@@ -1,4 +1,5 @@
 using System.Numerics;
+using CS2Browser.Layout;
 using Vortice.Direct2D1;
 using Vortice.DirectWrite;
 using DwFontStyle = Vortice.DirectWrite.FontStyle;
@@ -9,7 +10,7 @@ namespace CS2Browser.Rendering;
 /// DirectWrite 를 이용한 폰트/텍스트 렌더링과 텍스트 레이아웃(줄바꿈)을 담당한다.
 /// 한글/영문 혼용을 고려해 시스템 폰트(Malgun Gothic 등)를 사용한다.
 /// </summary>
-public sealed class DirectWriteTextRenderer : IDisposable
+public sealed class DirectWriteTextRenderer : ITextMeasurer, IDisposable
 {
     private readonly IDWriteFactory _factory;
     private readonly Dictionary<FormatKey, IDWriteTextFormat> _formats = new();
@@ -60,6 +61,24 @@ public sealed class DirectWriteTextRenderer : IDisposable
         var format = GetFormat(fontFamily, fontSize, bold, italic);
         using var layout = _factory.CreateTextLayout(text, format, MathF.Max(1f, width), MathF.Max(1f, height));
         target.DrawTextLayout(new Vector2(x, y), layout, brush);
+    }
+
+    /// <summary>
+    /// 렌더링에 사용하는 것과 동일한 DirectWrite 로 텍스트 폭을 측정한다.
+    /// 레이아웃의 단어 위치/줄바꿈이 실제 글꼴 메트릭과 일치하도록 한다.
+    /// </summary>
+    public float MeasureWidth(string text, float fontSize, string fontFamily, bool bold, bool italic)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 0f;
+        }
+
+        var format = GetFormat(fontFamily, fontSize, bold, italic);
+        using var layout = _factory.CreateTextLayout(text, format, 1_000_000f, 1_000_000f);
+        var metrics = layout.Metrics;
+        // 공백 문자의 폭도 포함해야 하므로 trailing whitespace 포함 값을 사용한다.
+        return metrics.WidthIncludingTrailingWhitespace;
     }
 
     public void Dispose()

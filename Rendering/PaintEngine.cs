@@ -50,6 +50,21 @@ public sealed class PaintEngine : IDisposable
             }
         }
 
+        if (!string.IsNullOrEmpty(box.ImageSource))
+        {
+            var bitmap = context.GetImage(box.ImageSource);
+            if (bitmap is not null)
+            {
+                var destination = new DRect(
+                    box.X,
+                    box.Y,
+                    MathF.Max(1f, box.Width),
+                    MathF.Max(1f, box.Height));
+
+                target.DrawBitmap(bitmap, destination, 1f, BitmapInterpolationMode.Linear, null);
+            }
+        }
+
         foreach (var child in box.Children)
         {
             PaintBox(target, context, child);

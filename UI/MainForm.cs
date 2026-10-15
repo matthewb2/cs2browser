@@ -63,6 +63,7 @@ public partial class MainForm : Form
 
     private readonly List<string> _history = new();
     private int _historyIndex = -1;
+    private bool _syncingScrollBar;
 
     public MainForm()
     {
@@ -73,6 +74,10 @@ public partial class MainForm : Form
         goButton.Click += async (_, _) => await NavigateFromAddressBarAsync();
         addressBar.KeyDown += OnAddressBarKeyDown;
         browserView.TitleChanged += OnTitleChanged;
+        browserView.ScrollMetricsChanged += (_, _) => UpdateScrollBar();
+        browserView.ScrollOffsetChanged += (_, _) => SyncScrollBarValue();
+        vScrollBar.Scroll += (_, _) => OnScrollBarScroll();
+        infoMenuItem.Click += (_, _) => ShowInfoDialog();
         Load += OnFormLoad;
 
         UpdateNavigationButtons();
@@ -80,11 +85,21 @@ public partial class MainForm : Form
 
     private async void OnFormLoad(object? sender, EventArgs e)
     {
-        addressBar.Text = LocalAddress;
         Cursor = Cursors.WaitCursor;
         try
         {
-            await browserView.LoadHtmlAsync(DefaultDocument);
+            var startPagePath = Path.Combine(AppContext.BaseDirectory, "Res", "index.html");
+            if (File.Exists(startPagePath))
+            {
+                await NavigateAsync(new Uri(startPagePath).AbsoluteUri, recordHistory: false);
+            }
+            else
+            {
+                // 출력 폴더에 Res 가 없을 때를 대비한 내장 문서 폴백.
+                addressBar.Text = LocalAddress;
+                statusLabel.Text = "완료: " + LocalAddress;
+                await browserView.LoadHtmlAsync(DefaultDocument);
+            }
         }
         catch (Exception ex)
         {
@@ -142,7 +157,9 @@ public partial class MainForm : Form
         finally
         {
             Cursor = Cursors.Default;
+            statusLabel.Text = "완료: " + address;
             UpdateNavigationButtons();
+            UpdateScrollBar();
         }
     }
 
@@ -188,6 +205,62 @@ public partial class MainForm : Form
     {
         backButton.Enabled = _historyIndex > 0;
         forwardButton.Enabled = _historyIndex >= 0 && _historyIndex < _history.Count - 1;
+    }
+
+    private void ShowInfoDialog()
+    {
+        using var dialog = new InfoDialog();
+        dialog.ShowDialog(this);
+    }
+
+    /// <summary>문서/뷰포트 크기에 맞춰 세로 스크롤바를 갱신한다.</summary>
+    private void UpdateScrollBar()
+    {
+        var viewport = Math.Max(1, browserView.ClientSize.Height);
+        var documentHeight = (int)Math.Ceiling(browserView.DocumentHeight);
+        var maxScroll = Math.Max(0, documentHeight - viewport);
+
+        _syncingScrollBar = true;
+        try
+        {
+            vScrollBar.LargeChange = viewport;
+            vScrollBar.SmallChange = 40;
+            // VScrollBar 는 Maximum - LargeChange + 1 이 실제 최대값이므로 보정한다.
+            vScrollBar.Maximum = maxScroll + vScrollBar.LargeChange - 1;
+            vScrollBar.Value = (int)Math.Clamp(browserView.ScrollOffsetY, 0, maxScroll);
+            vScrollBar.Enabled = maxScroll > 0;
+        }
+        finally
+        {
+            _syncingScrollBar = false;
+        }
+    }
+
+    /// <summary>스크롤바 조작(휠/드래그)이 아닌, 뷰의 오프셋 변경을 스크롤바에 반영한다.</summary>
+    private void SyncScrollBarValue()
+    {
+        var maxScroll = Math.Max(0, vScrollBar.Maximum - vScrollBar.LargeChange + 1);
+        var value = (int)Math.Clamp(browserView.ScrollOffsetY, 0, maxScroll);
+
+        _syncingScrollBar = true;
+        try
+        {
+            vScrollBar.Value = value;
+        }
+        finally
+        {
+            _syncingScrollBar = false;
+        }
+    }
+
+    private void OnScrollBarScroll()
+    {
+        if (_syncingScrollBar)
+        {
+            return;
+        }
+
+        browserView.SetScrollOffset(vScrollBar.Value);
     }
 
     private void OnTitleChanged(object? sender, string title)

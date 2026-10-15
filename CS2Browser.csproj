@@ -26,4 +26,9 @@
     <InternalsVisibleTo Include="CS2Browser.Tests" />
   </ItemGroup>
 
+  <!-- 시작 페이지 등 정적 리소스를 출력 폴더로 복사한다. -->
+  <ItemGroup>
+    <None Update="Res\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

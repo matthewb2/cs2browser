@@ -1,4 +1,5 @@
 using AngleSharp;
+using AngleSharp.Css;
 using AngleSharp.Dom;
 using AngleSharp.Io;
 using CS2Browser.Network;
@@ -12,6 +13,12 @@ namespace CS2Browser.Engine;
 public sealed class DomManager
 {
     private readonly ResourceLoader _resourceLoader;
+    private readonly DefaultRenderDevice _renderDevice = new()
+    {
+        ViewPortWidth = 1024,
+        ViewPortHeight = 768,
+        FontSize = 16
+    };
 
     public IBrowsingContext Context { get; }
 
@@ -25,11 +32,20 @@ public sealed class DomManager
 
         var configuration = Configuration.Default
             .WithDefaultLoader(new LoaderOptions { IsResourceLoadingEnabled = true })
+            .With(new FileRequester())
+            .WithRenderDevice(_renderDevice)
             .WithCss()
             .WithJs()
             .WithEventLoop();
 
         Context = BrowsingContext.New(configuration);
+    }
+
+    /// <summary>em/rem/vh 등 상대 단위 계산에 쓰이는 뷰포트 크기를 갱신한다.</summary>
+    public void SetViewport(int width, int height)
+    {
+        _renderDevice.ViewPortWidth = Math.Max(1, width);
+        _renderDevice.ViewPortHeight = Math.Max(1, height);
     }
 
     /// <summary>주소(URL)를 열고 파싱된 문서를 반환한다.</summary>

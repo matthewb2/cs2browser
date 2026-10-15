@@ -52,6 +52,11 @@ public sealed class BrowserEngine : IDisposable
     public void BuildLayout(float viewportWidth)
     {
         var document = DomManager.Document;
+        if (document is not null)
+        {
+            DomManager.SetViewport((int)MathF.Max(1f, viewportWidth), 768);
+        }
+
         LayoutRoot = document is null
             ? null
             : LayoutBuilder.Build(document, Math.Max(1f, viewportWidth));

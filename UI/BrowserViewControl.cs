@@ -1,6 +1,7 @@
 using CS2Browser.Engine;
 using CS2Browser.Rendering;
 using DColor = Vortice.Mathematics.Color4;
+using DMatrix3x2 = System.Numerics.Matrix3x2;
 
 namespace CS2Browser.UI;
 
@@ -17,9 +18,26 @@ public sealed class BrowserViewControl : UserControl
     private PaintEngine? _paintEngine;
     private Exception? _initializationError;
 
+    private float _scrollY;
+
     public event EventHandler<string>? TitleChanged;
 
+    /// <summary>문서 높이/뷰포트가 바뀌어 스크롤 가능 범위가 달라졌을 때 발생한다.</summary>
+    public event EventHandler? ScrollMetricsChanged;
+
+    /// <summary>스크롤 오프셋이 바뀌었을 때 발생한다(휠/스크롤바 등).</summary>
+    public event EventHandler? ScrollOffsetChanged;
+
     public string? CurrentAddress => _engine.CurrentAddress;
+
+    /// <summary>현재 세로 스크롤 오프셋(px).</summary>
+    public float ScrollOffsetY => _scrollY;
+
+    /// <summary>문서 전체 높이(px).</summary>
+    public float DocumentHeight => _engine.LayoutRoot?.Height ?? 0f;
+
+    /// <summary>스크롤 가능한 최대 오프셋(px).</summary>
+    public float MaxScroll => MathF.Max(0f, DocumentHeight - Math.Max(0, ClientSize.Height));
 
     public BrowserViewControl()
     {
@@ -45,7 +63,9 @@ public sealed class BrowserViewControl : UserControl
         }
         finally
         {
+            _scrollY = 0f;
             InvalidateFromAnyThread();
+            RaiseScrollMetricsChanged();
         }
     }
 
@@ -58,9 +78,32 @@ public sealed class BrowserViewControl : UserControl
         }
         finally
         {
+            _scrollY = 0f;
             InvalidateFromAnyThread();
+            RaiseScrollMetricsChanged();
         }
     }
+
+    /// <summary>세로 스크롤 오프셋을 설정한다(범위로 클램프).</summary>
+    public void SetScrollOffset(float offset)
+    {
+        var clamped = Math.Clamp(offset, 0f, MaxScroll);
+        if (MathF.Abs(clamped - _scrollY) < 0.5f)
+        {
+            return;
+        }
+
+        _scrollY = clamped;
+        if (IsHandleCreated && !IsDisposed)
+        {
+            Invalidate();
+        }
+
+        ScrollOffsetChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>델타만큼 스크롤한다.</summary>
+    public void ScrollBy(float delta) => SetScrollOffset(_scrollY + delta);
 
     protected override void OnHandleCreated(EventArgs e)
     {
@@ -80,6 +123,18 @@ public sealed class BrowserViewControl : UserControl
         if (_direct2D is { IsInitialized: true })
         {
             _direct2D.Resize(ClientSize.Width, ClientSize.Height);
+        }
+
+        ClampScroll();
+        RaiseScrollMetricsChanged();
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+        if (MaxScroll > 0f)
+        {
+            ScrollBy(-e.Delta);
         }
     }
 
@@ -105,6 +160,8 @@ public sealed class BrowserViewControl : UserControl
             _direct2D.Initialize(Handle, Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height));
             _textRenderer = new DirectWriteTextRenderer(_direct2D.WriteFactory);
             _paintEngine = new PaintEngine(_textRenderer);
+            // 레이아웃이 렌더링과 동일한 DirectWrite 메트릭으로 폭을 측정하도록 연결한다.
+            _engine.LayoutBuilder.TextMeasurer = _textRenderer;
             _initializationError = null;
         }
         catch (Exception ex)
@@ -124,6 +181,7 @@ public sealed class BrowserViewControl : UserControl
         _direct2D.Resize(ClientSize.Width, ClientSize.Height);
         _direct2D.BeginDraw();
         _direct2D.Clear(new DColor(1f, 1f, 1f, 1f));
+        _direct2D.SetTransform(DMatrix3x2.CreateTranslation(0f, -_scrollY));
 
         var layoutRoot = _engine.LayoutRoot;
         if (layoutRoot is not null)
@@ -131,6 +189,7 @@ public sealed class BrowserViewControl : UserControl
             _paintEngine.Paint(_direct2D.RenderTarget, _direct2D, layoutRoot);
         }
 
+        _direct2D.ResetTransform();
         _direct2D.EndDraw();
     }
 
@@ -147,11 +206,35 @@ public sealed class BrowserViewControl : UserControl
 
     private void OnLayoutUpdated(object? sender, EventArgs e)
     {
+        ClampScroll();
         InvalidateFromAnyThread();
+        RaiseScrollMetricsChanged();
     }
 
     private void OnTitleChanged(object? sender, EventArgs e)
         => TitleChanged?.Invoke(this, _engine.Title ?? string.Empty);
+
+    private void ClampScroll()
+    {
+        var max = MaxScroll;
+        if (_scrollY > max)
+        {
+            _scrollY = max;
+        }
+
+        if (_scrollY < 0f)
+        {
+            _scrollY = 0f;
+        }
+    }
+
+    private void RaiseScrollMetricsChanged()
+    {
+        if (IsHandleCreated && !IsDisposed)
+        {
+            ScrollMetricsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
 
     /// <summary>호출 스레드와 무관하게 UI 스레드에서 다시 그리도록 요청한다.</summary>
     private void InvalidateFromAnyThread()
@@ -180,6 +263,11 @@ public sealed class BrowserViewControl : UserControl
 
     private void DisposeGraphics()
     {
+        if (ReferenceEquals(_engine.LayoutBuilder.TextMeasurer, _textRenderer))
+        {
+            _engine.LayoutBuilder.TextMeasurer = null;
+        }
+
         _paintEngine?.Dispose();
         _paintEngine = null;
         _textRenderer?.Dispose();

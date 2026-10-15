@@ -40,6 +40,9 @@ public sealed class LayoutBox
 
     public Color4? BackgroundColor { get; set; }
 
+    /// <summary>렌더링할 이미지의 소스(절대 URL 또는 로컬 경로). null 이면 일반 박스.</summary>
+    public string? ImageSource { get; set; }
+
     /// <summary>배경을 채울 때 사용하는 패딩 박스(내용 + 패딩).</summary>
     public float PaddingBoxLeft => X - PaddingLeft;
     public float PaddingBoxTop => Y - PaddingTop;
@@ -68,6 +71,41 @@ public sealed class InlineBox
 
     public float X;
     public float Width;
+
+    public Color4 Color { get; set; } = new(0f, 0f, 0f, 1f);
+    public float FontSize { get; set; } = 16f;
+    public string FontFamily { get; set; } = "Malgun Gothic";
+    public bool Bold { get; set; }
+    public bool Italic { get; set; }
+}
+
+/// <summary>
+/// 인라인 텍스트 조각. 인라인 콘텐츠 전체를 담는 공유 버퍼(<see cref="Buffer"/>)에서
+/// [<see cref="Start"/>, <see cref="End"/>) 오프셋 구간을 참조하며 텍스트 스타일을 함께 가진다.
+/// 줄바꿈은 이 구간 안의 개행 문자('\n') 오프셋을 기준으로 판정된다.
+/// </summary>
+public sealed class LineFragment
+{
+    /// <summary>모든 조각이 공유하는 인라인 텍스트 버퍼.</summary>
+    public string Buffer { get; set; } = string.Empty;
+
+    /// <summary>버퍼 내 시작 오프셋.</summary>
+    public int Start { get; set; }
+
+    /// <summary>버퍼 내 길이.</summary>
+    public int Length { get; set; }
+
+    /// <summary>버퍼 내 끝 오프셋(배타).</summary>
+    public int End => Start + Length;
+
+    /// <summary>이 조각이 참조하는 버퍼 구간.</summary>
+    public ReadOnlySpan<char> Span =>
+        Start >= 0 && Start + Length <= Buffer.Length
+            ? Buffer.AsSpan(Start, Length)
+            : ReadOnlySpan<char>.Empty;
+
+    /// <summary>이 조각의 텍스트.</summary>
+    public string Text => Span.ToString();
 
     public Color4 Color { get; set; } = new(0f, 0f, 0f, 1f);
     public float FontSize { get; set; } = 16f;

@@ -11,11 +11,20 @@ namespace CS2Browser.Layout;
 /// 블록 요소는 세로로 쌓이고, 텍스트/인라인 내용은 줄바꿈하며 흐른다.
 /// (개략적인 블록/인라인 플로우 구현)
 /// </summary>
-public sealed class LayoutTreeBuilder
+public sealed partial class LayoutTreeBuilder
 {
     private const float DefaultFontSize = 16f;
     private const string DefaultFontFamily = "Malgun Gothic";
     private const float LineHeightFactor = 1.4f;
+
+    /// <summary>현재 레이아웃 중인 문서의 기준 URL(상대 경로 해석용).</summary>
+    private string _baseUrl = string.Empty;
+
+    /// <summary>
+    /// 텍스트 폭 측정기. 지정하지 않으면 근사치를 사용한다.
+    /// 실제 렌더러(DirectWrite)를 지정하면 렌더링과 동일한 메트릭으로 배치한다.
+    /// </summary>
+    public ITextMeasurer? TextMeasurer { get; set; }
 
     private static readonly HashSet<string> BlockTags = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -27,6 +36,8 @@ public sealed class LayoutTreeBuilder
 
     public LayoutBox Build(IDocument document, float viewportWidth)
     {
+        _baseUrl = document.Url ?? string.Empty;
+
         var root = new LayoutBox
         {
             TagName = "#viewport",
@@ -53,6 +64,11 @@ public sealed class LayoutTreeBuilder
         if (display == "none")
         {
             return top;
+        }
+
+        if (IsImageElement(element))
+        {
+            return LayoutImage(element, style, parent, left, top, availableWidth);
         }
 
         var textStyle = ReadTextStyle(style);
@@ -103,7 +119,8 @@ public sealed class LayoutTreeBuilder
         parent.Children.Add(box);
 
         var cursorY = contentTop;
-        var inlineBuffer = new List<InlineBox>();
+        var inlineBuffer = new List<LineFragment>();
+        var textBuffer = new StringBuilder();
 
         // flex-direction:row 인 컨테이너는 자식들을 가로로 배치한다.
         if (display is "flex" or "inline-flex")
@@ -128,11 +145,11 @@ public sealed class LayoutTreeBuilder
                         continue;
                     }
 
-                    if (IsBlock(childElement, childDisplay))
+                    if (IsBlock(childElement, childDisplay) || IsImageElement(childElement) || ContainsImage(childElement))
                     {
                         if (inlineBuffer.Count > 0)
                         {
-                            cursorY = FlowInlineContent(box, inlineBuffer, contentLeft, cursorY, innerWidth);
+                            cursorY = FlowInlineContent(box, inlineBuffer, textBuffer, contentLeft, cursorY, innerWidth);
                             inlineBuffer.Clear();
                         }
 
@@ -140,19 +157,19 @@ public sealed class LayoutTreeBuilder
                     }
                     else
                     {
-                        CollectInline(childElement, textStyle, inlineBuffer);
+                        CollectInline(childElement, textStyle, inlineBuffer, textBuffer);
                     }
                     break;
 
                 case IText textNode:
-                    AddTextRun(textNode.Data, textStyle, inlineBuffer);
+                    AddTextRun(textNode.Data, textStyle, inlineBuffer, textBuffer);
                     break;
             }
         }
 
         if (inlineBuffer.Count > 0)
         {
-            cursorY = FlowInlineContent(box, inlineBuffer, contentLeft, cursorY, innerWidth);
+            cursorY = FlowInlineContent(box, inlineBuffer, textBuffer, contentLeft, cursorY, innerWidth);
         }
 
         box.Height = MathF.Max(0f, cursorY - contentTop);
@@ -192,7 +209,7 @@ public sealed class LayoutTreeBuilder
     }
 
     /// <summary>자신의 내용만으로 결정되는 축소(shrink-to-fit) 폭을 근사 계산한다.</summary>
-    private static float EstimateIntrinsicWidth(IElement element, ICssStyleDeclaration? style)
+    private float EstimateIntrinsicWidth(IElement element, ICssStyleDeclaration? style)
     {
         var horizontalEdges =
             ParseLength(style?.GetPropertyValue("margin-left")) + ParseLength(style?.GetPropertyValue("margin-right"))
@@ -202,10 +219,25 @@ public sealed class LayoutTreeBuilder
         var textStyle = ReadTextStyle(style);
         var builder = new StringBuilder();
         CollectText(element, builder);
-        var textWidth = ApproximateTextWidth(builder.ToString().Trim(), textStyle.FontSize);
+        var text = builder.ToString().Trim();
+        var textWidth = MeasureWidth(text, textStyle);
 
         return horizontalEdges + textWidth + 1f;
     }
+
+    /// <summary>텍스트 폭을 측정한다(측정기가 있으면 정확히, 없으면 근사).</summary>
+    private float MeasureWidth(ReadOnlySpan<char> text, float fontSize, string fontFamily, bool bold, bool italic)
+    {
+        if (TextMeasurer is not null)
+        {
+            return TextMeasurer.MeasureWidth(text.ToString(), fontSize, fontFamily, bold, italic);
+        }
+
+        return ApproximateTextWidth(text, fontSize);
+    }
+
+    private float MeasureWidth(string text, TextStyle style)
+        => MeasureWidth(text, style.FontSize, style.FontFamily, style.Bold, style.Italic);
 
     private static void CollectText(INode node, StringBuilder builder)
     {
@@ -223,7 +255,7 @@ public sealed class LayoutTreeBuilder
         }
     }
 
-    private static void CollectInline(IElement element, TextStyle parentStyle, List<InlineBox> buffer)
+    private static void CollectInline(IElement element, TextStyle parentStyle, List<LineFragment> fragments, StringBuilder buffer)
     {
         var name = element.LocalName.ToLowerInvariant();
         if (name is "script" or "style" or "head" or "title" or "meta" or "link" or "template")
@@ -234,12 +266,19 @@ public sealed class LayoutTreeBuilder
         var style = SafeStyle(element);
         var textStyle = style is null ? parentStyle : ReadTextStyle(style);
 
+        // <br> 은 강제 줄바꿈이다.
+        if (name == "br")
+        {
+            AppendFragment("\n", textStyle, fragments, buffer);
+            return;
+        }
+
         foreach (var child in element.ChildNodes)
         {
             switch (child)
             {
                 case IText textNode:
-                    AddTextRun(textNode.Data, textStyle, buffer);
+                    AddTextRun(textNode.Data, textStyle, fragments, buffer);
                     break;
                 case IElement childElement:
                     if (GetDisplay(SafeStyle(childElement)) == "none")
@@ -247,102 +286,202 @@ public sealed class LayoutTreeBuilder
                         continue;
                     }
 
-                    CollectInline(childElement, textStyle, buffer);
+                    CollectInline(childElement, textStyle, fragments, buffer);
                     break;
             }
         }
     }
 
-    private static float FlowInlineContent(LayoutBox box, List<InlineBox> runs, float x, float y, float maxWidth)
+    /// <summary>
+    /// 인라인 조각들을 오프셋 기준으로 흘려보내며 줄을 만든다.
+    /// 공유 버퍼 안의 개행 문자('\n') 오프셋에서 강제 줄바꿈하고,
+    /// 줄 폭을 넘으면 자동으로 줄바꿈한다.
+    /// </summary>
+    private float FlowInlineContent(
+        LayoutBox box,
+        List<LineFragment> fragments,
+        StringBuilder textBuffer,
+        float x,
+        float y,
+        float maxWidth)
     {
-        var words = new List<InlineBox>();
-        foreach (var run in runs)
-        {
-            foreach (var part in run.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-            {
-                words.Add(new InlineBox
-                {
-                    Text = part,
-                    Color = run.Color,
-                    FontSize = run.FontSize,
-                    FontFamily = run.FontFamily,
-                    Bold = run.Bold,
-                    Italic = run.Italic
-                });
-            }
-        }
-
-        if (words.Count == 0)
+        if (fragments.Count == 0)
         {
             return y;
         }
 
-        var lineHeight = words.Max(w => w.FontSize) * LineHeightFactor;
-        var cursorY = y;
-        var line = new LineBox { X = x, Y = cursorY, Height = lineHeight };
-        box.Lines.Add(line);
-
-        var cursorX = x;
-        var first = true;
-
-        foreach (var word in words)
+        // 모든 조각이 참조할 공유 버퍼를 확정한다.
+        var buffer = textBuffer.ToString();
+        foreach (var fragment in fragments)
         {
-            var wordWidth = ApproximateTextWidth(word.Text, word.FontSize);
-            var spaceWidth = word.FontSize * 0.3f;
-            var advance = (first ? 0f : spaceWidth) + wordWidth;
-
-            if (!first && cursorX + advance > x + maxWidth)
-            {
-                line.Width = cursorX - x;
-                cursorY += lineHeight;
-                line = new LineBox { X = x, Y = cursorY, Height = lineHeight };
-                box.Lines.Add(line);
-                cursorX = x;
-                first = true;
-                advance = wordWidth;
-            }
-
-            if (!first)
-            {
-                cursorX += spaceWidth;
-            }
-
-            var placed = new InlineBox
-            {
-                Text = word.Text,
-                X = cursorX,
-                Width = wordWidth,
-                Color = word.Color,
-                FontSize = word.FontSize,
-                FontFamily = word.FontFamily,
-                Bold = word.Bold,
-                Italic = word.Italic
-            };
-            line.Runs.Add(placed);
-            cursorX += wordWidth;
-            first = false;
+            fragment.Buffer = buffer;
         }
 
-        line.Width = cursorX - x;
-        return cursorY + lineHeight;
+        var lineHeight = LineHeightFactor * fragments
+            .Where(f => f.Length > 0)
+            .Select(f => f.FontSize)
+            .DefaultIfEmpty(DefaultFontSize)
+            .Max();
+
+        var lineTop = y;
+        var bottom = y;
+        var cursorX = x;
+        var hasContent = false;      // 현재 줄에 내용이 있는지
+        var hasAnyContent = false;   // 블록에 내용이 하나라도 있는지
+        var pendingBreaks = 0;       // 아직 반영되지 않은 강제 줄바꿈 수
+        var pendingSpace = false;    // 공백이 있었는지(공백에서 줄바꿈 가능)
+        var previousWasCjk = false;  // 직전 토큰이 CJK 글자였는지(글자 단위 줄바꿈)
+        LineBox? line = null;
+
+        void StartLine()
+        {
+            line = new LineBox { X = x, Y = lineTop, Height = lineHeight };
+            box.Lines.Add(line);
+            cursorX = x;
+            hasContent = false;
+            previousWasCjk = false;
+        }
+
+        foreach (var fragment in fragments)
+        {
+            var span = fragment.Span;
+            var index = 0;
+            while (index < span.Length)
+            {
+                var ch = span[index];
+                if (ch == '\n')
+                {
+                    pendingBreaks++;
+                    index++;
+                    continue;
+                }
+
+                if (ch == ' ')
+                {
+                    pendingSpace = true;
+                    index++;
+                    continue;
+                }
+
+                // 토큰 추출: CJK/한글은 한 글자씩, 그 외는 단어 단위.
+                var tokenStart = index;
+                var isCjk = IsCjkChar(ch);
+                if (isCjk)
+                {
+                    index++;
+                }
+                else
+                {
+                    while (index < span.Length && !IsTokenBoundary(span[index]))
+                    {
+                        index++;
+                    }
+                }
+
+                var token = span.Slice(tokenStart, index - tokenStart);
+                var tokenWidth = MeasureWidth(token, fragment.FontSize, fragment.FontFamily, fragment.Bold, fragment.Italic);
+
+                // 대기 중인 강제 줄바꿈을 반영한다. 블록 선두의 줄바꿈은 무시한다.
+                if (pendingBreaks > 0)
+                {
+                    if (hasAnyContent)
+                    {
+                        if (line is not null)
+                        {
+                            line.Width = cursorX - x;
+                        }
+
+                        lineTop += pendingBreaks * lineHeight;
+                        line = null;
+                        cursorX = x;
+                        hasContent = false;
+                    }
+
+                    pendingBreaks = 0;
+                    pendingSpace = false;
+                }
+
+                if (line is null)
+                {
+                    StartLine();
+                }
+
+                // 이 토큰 앞에서 줄을 바꿀 수 있는지:
+                //  - CJK 글자이거나, 앞에 공백이 있었거나,
+                //  - 직전 토큰이 CJK 글자였으면 (한글은 글자 단위 줄바꿈)
+                var canBreakBefore = isCjk || pendingSpace || previousWasCjk;
+                var spaceWidth = pendingSpace
+                    ? MeasureWidth(" ", fragment.FontSize, fragment.FontFamily, fragment.Bold, fragment.Italic)
+                    : 0f;
+
+                if (hasContent && canBreakBefore && cursorX + spaceWidth + tokenWidth > x + maxWidth)
+                {
+                    line!.Width = cursorX - x;
+                    lineTop += lineHeight;
+                    StartLine();
+                    spaceWidth = 0f;
+                }
+
+                if (hasContent && spaceWidth > 0f)
+                {
+                    cursorX += spaceWidth;
+                }
+
+                line!.Runs.Add(new InlineBox
+                {
+                    Text = token.ToString(),
+                    X = cursorX,
+                    Width = tokenWidth,
+                    Color = fragment.Color,
+                    FontSize = fragment.FontSize,
+                    FontFamily = fragment.FontFamily,
+                    Bold = fragment.Bold,
+                    Italic = fragment.Italic
+                });
+
+                cursorX += tokenWidth;
+                hasContent = true;
+                hasAnyContent = true;
+                previousWasCjk = isCjk;
+                pendingSpace = false;
+                bottom = MathF.Max(bottom, lineTop + lineHeight);
+            }
+        }
+
+        if (line is not null)
+        {
+            line.Width = cursorX - x;
+        }
+
+        return bottom;
     }
 
-    private static void AddTextRun(string raw, TextStyle style, List<InlineBox> buffer)
+    private static void AddTextRun(string raw, TextStyle style, List<LineFragment> fragments, StringBuilder buffer)
     {
         if (string.IsNullOrEmpty(raw))
         {
             return;
         }
 
-        var normalized = CollapseWhitespace(raw);
+        var normalized = NormalizeInlineWhitespace(raw);
         if (normalized.Length == 0)
         {
             return;
         }
 
-        buffer.Add(new InlineBox
+        AppendFragment(normalized, style, fragments, buffer);
+    }
+
+    /// <summary>공유 버퍼 뒤에 텍스트를 추가하고 그 구간을 참조하는 조각을 만든다.</summary>
+    private static void AppendFragment(string text, TextStyle style, List<LineFragment> fragments, StringBuilder buffer)
+    {
+        var start = buffer.Length;
+        buffer.Append(text);
+
+        fragments.Add(new LineFragment
         {
-            Text = normalized,
+            Start = start,
+            Length = text.Length,
             Color = style.Color,
             FontSize = style.FontSize,
             FontFamily = style.FontFamily,
@@ -351,38 +490,58 @@ public sealed class LayoutTreeBuilder
         });
     }
 
-    private static string CollapseWhitespace(string value)
+    /// <summary>
+    /// 연속된 공백/탭은 하나의 공백으로 축약하되, 개행(\r\n, \r, \n)은
+    /// 줄바꿈 기준('\n')으로 보존한다.
+    /// </summary>
+    private static string NormalizeInlineWhitespace(string value)
     {
         var builder = new StringBuilder(value.Length);
         var lastWasSpace = false;
-        foreach (var ch in value)
+        for (var i = 0; i < value.Length; i++)
         {
-            if (char.IsWhiteSpace(ch))
+            var ch = value[i];
+            switch (ch)
             {
-                if (!lastWasSpace)
-                {
-                    builder.Append(' ');
-                    lastWasSpace = true;
-                }
-            }
-            else
-            {
-                builder.Append(ch);
-                lastWasSpace = false;
+                case '\r':
+                    if (i + 1 < value.Length && value[i + 1] == '\n')
+                    {
+                        i++;
+                    }
+
+                    builder.Append('\n');
+                    lastWasSpace = false;
+                    break;
+                case '\n':
+                    builder.Append('\n');
+                    lastWasSpace = false;
+                    break;
+                case ' ' or '\t' or '\f' or '\v':
+                    if (!lastWasSpace)
+                    {
+                        builder.Append(' ');
+                        lastWasSpace = true;
+                    }
+
+                    break;
+                default:
+                    builder.Append(ch);
+                    lastWasSpace = false;
+                    break;
             }
         }
 
         return builder.ToString();
     }
 
-    private static float ApproximateTextWidth(string text, float fontSize)
+    private static float ApproximateTextWidth(ReadOnlySpan<char> text, float fontSize)
     {
         var width = 0f;
         foreach (var ch in text)
         {
-            if (ch > 0x2E80)
+            if (IsCjkChar(ch))
             {
-                width += fontSize; // CJK 등 전각 문자
+                width += fontSize; // CJK/한글 등 전각 문자
             }
             else if (ch == ' ')
             {
@@ -396,6 +555,25 @@ public sealed class LayoutTreeBuilder
 
         return width;
     }
+
+    /// <summary>단어 토큰의 경계가 되는 문자(공백/개행/CJK 글자)인지 확인한다.</summary>
+    private static bool IsTokenBoundary(char ch)
+        => ch == ' ' || ch == '\n' || IsCjkChar(ch);
+
+    /// <summary>
+    /// 글자 단위 줄바꿈이 가능한 CJK(한글/한자/가나) 문자인지 확인한다.
+    /// 한글 음절은 물론 자모/호환 자모, 한자, 가나, 전각 문자를 포함한다.
+    /// </summary>
+    private static bool IsCjkChar(char ch)
+        => (ch >= '\u1100' && ch <= '\u11FF')   // 한글 자모
+        || (ch >= '\u2E80' && ch <= '\u303F')   // CJK 부수/기호/구두점
+        || (ch >= '\u3040' && ch <= '\u30FF')   // 히라가나/가타카나
+        || (ch >= '\u3130' && ch <= '\u318F')   // 한글 호환 자모
+        || (ch >= '\u3400' && ch <= '\u4DBF')   // CJK 확장 A
+        || (ch >= '\u4E00' && ch <= '\u9FFF')   // CJK 통합 한자
+        || (ch >= '\uAC00' && ch <= '\uD7A3')   // 한글 음절
+        || (ch >= '\uF900' && ch <= '\uFAFF')   // CJK 호환 한자
+        || (ch >= '\uFF00' && ch <= '\uFFEF');  // 전각/반각 형태
 
     private static bool IsBlock(IElement element, string display)
     {
