@@ -40,6 +40,12 @@ public sealed class LayoutBox
 
     public Color4? BackgroundColor { get; set; }
 
+    /// <summary>이 박스가 나타내는 링크(&lt;a href&gt;). null 이면 일반 박스.</summary>
+    public LinkTarget? Link { get; set; }
+
+    /// <summary>링크의 절대 URL(편의용).</summary>
+    public string? LinkUrl => Link?.Url;
+
     /// <summary>렌더링할 이미지의 소스(절대 URL 또는 로컬 경로). null 이면 일반 박스.</summary>
     public string? ImageSource { get; set; }
 
@@ -77,6 +83,12 @@ public sealed class InlineBox
     public string FontFamily { get; set; } = "Malgun Gothic";
     public bool Bold { get; set; }
     public bool Italic { get; set; }
+
+    /// <summary>이 텍스트 조각이 속한 링크(&lt;a href&gt;). null 이면 링크 아님.</summary>
+    public LinkTarget? Link { get; set; }
+
+    /// <summary>링크의 절대 URL(편의용).</summary>
+    public string? LinkUrl => Link?.Url;
 }
 
 /// <summary>
@@ -112,4 +124,22 @@ public sealed class LineFragment
     public string FontFamily { get; set; } = "Malgun Gothic";
     public bool Bold { get; set; }
     public bool Italic { get; set; }
+
+    /// <summary>이 조각이 속한 링크(&lt;a href&gt;). null 이면 링크 아님.</summary>
+    public LinkTarget? Link { get; set; }
+
+    /// <summary>링크의 절대 URL(편의용).</summary>
+    public string? LinkUrl => Link?.Url;
+}
+
+/// <summary>
+/// 하나의 &lt;a href&gt; 앵커를 나타낸다. 앵커의 모든 조각/박스가 동일 인스턴스를 공유하므로
+/// 참조 비교로 "같은 링크"를 구분할 수 있다(같은 URL의 다른 링크와도 구별됨).
+/// </summary>
+public sealed class LinkTarget
+{
+    public LinkTarget(string url) => Url = url;
+
+    /// <summary>해석된 절대 URL.</summary>
+    public string Url { get; }
 }

@@ -18,6 +18,54 @@ public sealed class PaintEngine : IDisposable
     public void Paint(ID2D1RenderTarget target, Direct2DContext context, LayoutBox root)
         => PaintBox(target, context, root);
 
+    /// <summary>
+    /// 지정한 링크 위에 마우스가 올라갔을 때, 그 링크에 속한 텍스트 아래에 밑줄을 그린다.
+    /// 같은 줄에서 같은 링크에 속한 런들은 하나의 연속된 밑줄로 이어 그린다.
+    /// </summary>
+    public void PaintLinkUnderlines(ID2D1RenderTarget target, Direct2DContext context, LayoutBox root, LinkTarget hoveredLink)
+        => PaintUnderlinesBox(target, context, root, hoveredLink);
+
+    private void PaintUnderlinesBox(ID2D1RenderTarget target, Direct2DContext context, LayoutBox box, LinkTarget hoveredLink)
+    {
+        foreach (var line in box.Lines)
+        {
+            var firstX = float.MaxValue;
+            var lastX = float.MinValue;
+            var thickness = 0f;
+            var color = new DColor(0f, 0f, 0f, 1f);
+            var any = false;
+
+            foreach (var run in line.Runs)
+            {
+                if (!ReferenceEquals(run.Link, hoveredLink))
+                {
+                    continue;
+                }
+
+                firstX = MathF.Min(firstX, run.X);
+                lastX = MathF.Max(lastX, run.X + run.Width);
+                thickness = MathF.Max(thickness, MathF.Max(1f, run.FontSize * 0.06f));
+                color = run.Color;
+                any = true;
+            }
+
+            if (!any || lastX <= firstX)
+            {
+                continue;
+            }
+
+            // 밑줄은 줄 상자 하단 근처(베이스라인 아래)에 둔다.
+            var y = line.Y + line.Height - thickness - line.Height * 0.12f;
+            var rectangle = new DRect(firstX, y, lastX - firstX, thickness);
+            target.FillRectangle(rectangle, context.GetBrush(color));
+        }
+
+        foreach (var child in box.Children)
+        {
+            PaintUnderlinesBox(target, context, child, hoveredLink);
+        }
+    }
+
     private void PaintBox(ID2D1RenderTarget target, Direct2DContext context, LayoutBox box)
     {
         if (box.BackgroundColor is DColor background && background.A > 0f)

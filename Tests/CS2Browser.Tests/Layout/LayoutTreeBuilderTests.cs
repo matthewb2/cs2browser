@@ -238,4 +238,58 @@ public sealed class LayoutTreeBuilderTests
         // 근사치(4 * 0.5 * 44.8 = 89.6)보다 큰 실제 측정 폭이어야 한다.
         Assert.IsTrue(runs[0].Width > 4f * 0.5f * 44.8f, "DirectWrite 측정기가 사용되지 않았습니다.");
     }
+
+    [TestMethod]
+    public async Task Build_AnchorText_SetsLinkUrlOnRuns()
+    {
+        var root = await BuildAsync(
+            "<html><body><p style='margin:0'><a href='page.html'>Link</a></p></body></html>");
+
+        var p = root.Children[0].Children[0];
+        var run = p.Lines[0].Runs[0];
+
+        Assert.IsNotNull(run.LinkUrl, "앵커 텍스트 런에 LinkUrl 이 설정되지 않았습니다.");
+        StringAssert.Contains(run.LinkUrl!, "page.html");
+    }
+
+    [TestMethod]
+    public async Task Build_NonAnchor_HasNoLinkUrl()
+    {
+        var root = await BuildAsync("<html><body><p style='margin:0'>plain</p></body></html>");
+
+        var p = root.Children[0].Children[0];
+        Assert.IsNull(p.Lines[0].Runs[0].LinkUrl);
+        Assert.IsNull(p.LinkUrl);
+    }
+
+    [TestMethod]
+    public async Task Build_AnchorWrappingImage_SetsLinkUrlOnImageBox()
+    {
+        var root = await BuildAsync(
+            "<html><body style='margin:0'><a href='target.html'><img src='missing.png'></a></body></html>");
+
+        var image = FindFirstImage(root);
+        Assert.IsNotNull(image, "이미지 박스를 찾지 못했습니다.");
+        Assert.IsNotNull(image!.LinkUrl, "앵커로 감싼 이미지에 LinkUrl 이 없습니다.");
+        StringAssert.Contains(image.LinkUrl!, "target.html");
+    }
+
+    private static LayoutBox? FindFirstImage(LayoutBox box)
+    {
+        if (!string.IsNullOrEmpty(box.ImageSource))
+        {
+            return box;
+        }
+
+        foreach (var child in box.Children)
+        {
+            var found = FindFirstImage(child);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
 }

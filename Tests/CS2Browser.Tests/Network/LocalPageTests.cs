@@ -86,6 +86,53 @@ public sealed class LocalPageTests
         }
     }
 
+    private static IEnumerable<string> CollectLinks(LayoutBox box)
+    {
+        if (!string.IsNullOrEmpty(box.LinkUrl))
+        {
+            yield return box.LinkUrl!;
+        }
+
+        foreach (var line in box.Lines)
+        {
+            foreach (var run in line.Runs)
+            {
+                if (!string.IsNullOrEmpty(run.LinkUrl))
+                {
+                    yield return run.LinkUrl!;
+                }
+            }
+        }
+
+        foreach (var child in box.Children)
+        {
+            foreach (var link in CollectLinks(child))
+            {
+                yield return link;
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task OpenAsync_LocalPage_ResolvesAnchorLinksToAbsoluteUrls()
+    {
+        using var loader = new ResourceLoader();
+        var dom = new DomManager(loader);
+
+        var document = await dom.OpenAsync(StartPageUrl());
+        var root = new LayoutTreeBuilder().Build(document, 1024f);
+
+        var links = CollectLinks(root).ToList();
+
+        // 텍스트 링크(예: Home -> index.html, About -> about.html)가 절대 URL로 해석되어야 한다.
+        Assert.IsTrue(links.Any(u => u.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)),
+            "index.html 링크를 찾지 못했습니다: " + string.Join(", ", links));
+        Assert.IsTrue(links.Any(u => u.EndsWith("about.html", StringComparison.OrdinalIgnoreCase)),
+            "about.html 링크를 찾지 못했습니다: " + string.Join(", ", links));
+        Assert.IsTrue(links.All(u => u.StartsWith("file:", StringComparison.OrdinalIgnoreCase)),
+            "링크가 절대 URL로 해석되지 않았습니다: " + string.Join(", ", links));
+    }
+
     private static IEnumerable<string> CollectText(LayoutBox box)
     {
         foreach (var line in box.Lines)

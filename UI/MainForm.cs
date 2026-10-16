@@ -76,6 +76,8 @@ public partial class MainForm : Form
         browserView.TitleChanged += OnTitleChanged;
         browserView.ScrollMetricsChanged += (_, _) => UpdateScrollBar();
         browserView.ScrollOffsetChanged += (_, _) => SyncScrollBarValue();
+        browserView.LinkClicked += OnLinkClicked;
+        browserView.LinkHovered += OnLinkHovered;
         vScrollBar.Scroll += (_, _) => OnScrollBarScroll();
         infoMenuItem.Click += (_, _) => ShowInfoDialog();
         Load += OnFormLoad;
@@ -273,4 +275,17 @@ public partial class MainForm : Form
 
         Text = string.IsNullOrWhiteSpace(title) ? "CS2Browser" : title + " - CS2Browser";
     }
+
+    private async void OnLinkClicked(object? sender, string url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return;
+        }
+
+        await NavigateAsync(url);
+    }
+
+    private void OnLinkHovered(object? sender, string url)
+        => statusLabel.Text = string.IsNullOrEmpty(url) ? "준비됨" : url;
 }

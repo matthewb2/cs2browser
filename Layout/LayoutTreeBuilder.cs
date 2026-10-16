@@ -57,7 +57,7 @@ public sealed partial class LayoutTreeBuilder
         return root;
     }
 
-    private float LayoutBlock(IElement element, LayoutBox parent, float left, float top, float availableWidth)
+    private float LayoutBlock(IElement element, LayoutBox parent, float left, float top, float availableWidth, LinkTarget? inheritedLink = null)
     {
         var style = SafeStyle(element);
         var display = GetDisplay(style);
@@ -66,9 +66,11 @@ public sealed partial class LayoutTreeBuilder
             return top;
         }
 
+        var link = GetLinkTarget(element) ?? inheritedLink;
+
         if (IsImageElement(element))
         {
-            return LayoutImage(element, style, parent, left, top, availableWidth);
+            return LayoutImage(element, style, parent, left, top, availableWidth, link);
         }
 
         var textStyle = ReadTextStyle(style);
@@ -100,6 +102,7 @@ public sealed partial class LayoutTreeBuilder
             TagName = element.LocalName,
             Parent = parent,
             BackgroundColor = ReadBackground(style),
+            Link = link,
             MarginTop = marginTop,
             MarginRight = marginRight,
             MarginBottom = marginBottom,
@@ -153,16 +156,16 @@ public sealed partial class LayoutTreeBuilder
                             inlineBuffer.Clear();
                         }
 
-                        cursorY = LayoutBlock(childElement, box, contentLeft, cursorY, innerWidth);
+                        cursorY = LayoutBlock(childElement, box, contentLeft, cursorY, innerWidth, link);
                     }
                     else
                     {
-                        CollectInline(childElement, textStyle, inlineBuffer, textBuffer);
+                        CollectInline(childElement, textStyle, inlineBuffer, textBuffer, GetLinkTarget(childElement) ?? link);
                     }
                     break;
 
                 case IText textNode:
-                    AddTextRun(textNode.Data, textStyle, inlineBuffer, textBuffer);
+                    AddTextRun(textNode.Data, textStyle, inlineBuffer, textBuffer, link);
                     break;
             }
         }
@@ -198,7 +201,7 @@ public sealed partial class LayoutTreeBuilder
             var remaining = MathF.Max(1f, contentLeft + innerWidth - cursorX);
             var childWidth = MathF.Min(EstimateIntrinsicWidth(childElement, childStyle), remaining);
 
-            var bottom = LayoutBlock(childElement, box, cursorX, contentTop, childWidth);
+            var bottom = LayoutBlock(childElement, box, cursorX, contentTop, childWidth, box.Link);
             var childBox = box.Children[^1];
 
             cursorX = childBox.X + childBox.Width + childBox.PaddingRight + childBox.BorderRight + childBox.MarginRight;
@@ -255,7 +258,7 @@ public sealed partial class LayoutTreeBuilder
         }
     }
 
-    private static void CollectInline(IElement element, TextStyle parentStyle, List<LineFragment> fragments, StringBuilder buffer)
+    private static void CollectInline(IElement element, TextStyle parentStyle, List<LineFragment> fragments, StringBuilder buffer, LinkTarget? link = null)
     {
         var name = element.LocalName.ToLowerInvariant();
         if (name is "script" or "style" or "head" or "title" or "meta" or "link" or "template")
@@ -269,7 +272,7 @@ public sealed partial class LayoutTreeBuilder
         // <br> 은 강제 줄바꿈이다.
         if (name == "br")
         {
-            AppendFragment("\n", textStyle, fragments, buffer);
+            AppendFragment("\n", textStyle, fragments, buffer, link);
             return;
         }
 
@@ -278,7 +281,7 @@ public sealed partial class LayoutTreeBuilder
             switch (child)
             {
                 case IText textNode:
-                    AddTextRun(textNode.Data, textStyle, fragments, buffer);
+                    AddTextRun(textNode.Data, textStyle, fragments, buffer, link);
                     break;
                 case IElement childElement:
                     if (GetDisplay(SafeStyle(childElement)) == "none")
@@ -286,7 +289,7 @@ public sealed partial class LayoutTreeBuilder
                         continue;
                     }
 
-                    CollectInline(childElement, textStyle, fragments, buffer);
+                    CollectInline(childElement, textStyle, fragments, buffer, link);
                     break;
             }
         }
@@ -436,7 +439,8 @@ public sealed partial class LayoutTreeBuilder
                     FontSize = fragment.FontSize,
                     FontFamily = fragment.FontFamily,
                     Bold = fragment.Bold,
-                    Italic = fragment.Italic
+                    Italic = fragment.Italic,
+                    Link = fragment.Link
                 });
 
                 cursorX += tokenWidth;
@@ -456,7 +460,7 @@ public sealed partial class LayoutTreeBuilder
         return bottom;
     }
 
-    private static void AddTextRun(string raw, TextStyle style, List<LineFragment> fragments, StringBuilder buffer)
+    private static void AddTextRun(string raw, TextStyle style, List<LineFragment> fragments, StringBuilder buffer, LinkTarget? link = null)
     {
         if (string.IsNullOrEmpty(raw))
         {
@@ -469,11 +473,11 @@ public sealed partial class LayoutTreeBuilder
             return;
         }
 
-        AppendFragment(normalized, style, fragments, buffer);
+        AppendFragment(normalized, style, fragments, buffer, link);
     }
 
     /// <summary>공유 버퍼 뒤에 텍스트를 추가하고 그 구간을 참조하는 조각을 만든다.</summary>
-    private static void AppendFragment(string text, TextStyle style, List<LineFragment> fragments, StringBuilder buffer)
+    private static void AppendFragment(string text, TextStyle style, List<LineFragment> fragments, StringBuilder buffer, LinkTarget? link = null)
     {
         var start = buffer.Length;
         buffer.Append(text);
@@ -486,7 +490,8 @@ public sealed partial class LayoutTreeBuilder
             FontSize = style.FontSize,
             FontFamily = style.FontFamily,
             Bold = style.Bold,
-            Italic = style.Italic
+            Italic = style.Italic,
+            Link = link
         });
     }
 

@@ -1,4 +1,5 @@
 using CS2Browser.Engine;
+using CS2Browser.Layout;
 using CS2Browser.Rendering;
 using DColor = Vortice.Mathematics.Color4;
 using DMatrix3x2 = System.Numerics.Matrix3x2;
@@ -19,6 +20,8 @@ public sealed class BrowserViewControl : UserControl
     private Exception? _initializationError;
 
     private float _scrollY;
+    private bool _linkCursorActive;
+    private LinkTarget? _hoveredLink;
 
     public event EventHandler<string>? TitleChanged;
 
@@ -27,6 +30,12 @@ public sealed class BrowserViewControl : UserControl
 
     /// <summary>스크롤 오프셋이 바뀌었을 때 발생한다(휠/스크롤바 등).</summary>
     public event EventHandler? ScrollOffsetChanged;
+
+    /// <summary>링크를 클릭했을 때 대상 절대 URL과 함께 발생한다.</summary>
+    public event EventHandler<string>? LinkClicked;
+
+    /// <summary>마우스가 링크 위로 올라가면 URL, 벗어나면 빈 문자열과 함께 발생한다.</summary>
+    public event EventHandler<string>? LinkHovered;
 
     public string? CurrentAddress => _engine.CurrentAddress;
 
@@ -64,6 +73,7 @@ public sealed class BrowserViewControl : UserControl
         finally
         {
             _scrollY = 0f;
+            _hoveredLink = null;
             InvalidateFromAnyThread();
             RaiseScrollMetricsChanged();
         }
@@ -79,6 +89,7 @@ public sealed class BrowserViewControl : UserControl
         finally
         {
             _scrollY = 0f;
+            _hoveredLink = null;
             InvalidateFromAnyThread();
             RaiseScrollMetricsChanged();
         }
@@ -104,6 +115,60 @@ public sealed class BrowserViewControl : UserControl
 
     /// <summary>델타만큼 스크롤한다.</summary>
     public void ScrollBy(float delta) => SetScrollOffset(_scrollY + delta);
+
+    /// <summary>
+    /// 주어진 클라이언트 좌표(컨트롤 기준)에 있는 링크를 찾는다.
+    /// 스크롤 오프셋을 반영해 문서 좌표로 변환한 뒤 레이아웃 트리를 검사한다.
+    /// </summary>
+    public bool TryGetLinkAt(Point clientPoint, out LinkTarget? link)
+    {
+        var documentY = clientPoint.Y + _scrollY;
+        return HitTestLink(_engine.LayoutRoot, clientPoint.X, documentY, out link);
+    }
+
+    private static bool HitTestLink(LayoutBox? box, float x, float y, out LinkTarget? link)
+    {
+        link = null;
+        if (box is null)
+        {
+            return false;
+        }
+
+        // 텍스트 조각(가장 정밀한 히트 영역)을 먼저 검사한다.
+        foreach (var line in box.Lines)
+        {
+            foreach (var run in line.Runs)
+            {
+                if (run.Link is not null
+                    && x >= run.X && x <= run.X + run.Width
+                    && y >= line.Y && y <= line.Y + line.Height)
+                {
+                    link = run.Link;
+                    return true;
+                }
+            }
+        }
+
+        // 블록 앵커/이미지처럼 박스 자체가 링크인 경우.
+        if (box.Link is not null
+            && x >= box.X && x <= box.X + box.Width
+            && y >= box.Y && y <= box.Y + box.Height)
+        {
+            link = box.Link;
+            return true;
+        }
+
+        // 자식(더 안쪽)이 우선하도록 재귀한다.
+        foreach (var child in box.Children)
+        {
+            if (HitTestLink(child, x, y, out link))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     protected override void OnHandleCreated(EventArgs e)
     {
@@ -135,6 +200,58 @@ public sealed class BrowserViewControl : UserControl
         if (MaxScroll > 0f)
         {
             ScrollBy(-e.Delta);
+        }
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+
+        var overLink = TryGetLinkAt(e.Location, out var link);
+
+        if (overLink != _linkCursorActive)
+        {
+            _linkCursorActive = overLink;
+            Cursor = overLink ? Cursors.Hand : Cursors.Default;
+        }
+
+        if (!ReferenceEquals(link, _hoveredLink))
+        {
+            _hoveredLink = overLink ? link : null;
+            Invalidate();
+        }
+
+        LinkHovered?.Invoke(this, overLink && link is not null ? link.Url : string.Empty);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+
+        if (_linkCursorActive)
+        {
+            _linkCursorActive = false;
+            Cursor = Cursors.Default;
+        }
+
+        if (_hoveredLink is not null)
+        {
+            _hoveredLink = null;
+            Invalidate();
+        }
+
+        LinkHovered?.Invoke(this, string.Empty);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+
+        if (e.Button == MouseButtons.Left
+            && TryGetLinkAt(e.Location, out var link)
+            && link is not null)
+        {
+            LinkClicked?.Invoke(this, link.Url);
         }
     }
 
@@ -187,6 +304,11 @@ public sealed class BrowserViewControl : UserControl
         if (layoutRoot is not null)
         {
             _paintEngine.Paint(_direct2D.RenderTarget, _direct2D, layoutRoot);
+
+            if (_hoveredLink is not null)
+            {
+                _paintEngine.PaintLinkUnderlines(_direct2D.RenderTarget, _direct2D, layoutRoot, _hoveredLink);
+            }
         }
 
         _direct2D.ResetTransform();

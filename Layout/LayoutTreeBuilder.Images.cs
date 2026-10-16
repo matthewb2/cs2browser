@@ -11,7 +11,7 @@ namespace CS2Browser.Layout;
 public sealed partial class LayoutTreeBuilder
 {
     /// <summary>대체 요소(replaced element)인 &lt;img&gt; 를 레이아웃한다.</summary>
-    private float LayoutImage(IElement element, ICssStyleDeclaration? style, LayoutBox parent, float left, float top, float availableWidth)
+    private float LayoutImage(IElement element, ICssStyleDeclaration? style, LayoutBox parent, float left, float top, float availableWidth, LinkTarget? link = null)
     {
         var marginTop = ParseLength(style?.GetPropertyValue("margin-top"));
         var marginRight = ParseLength(style?.GetPropertyValue("margin-right"));
@@ -64,6 +64,7 @@ public sealed partial class LayoutTreeBuilder
             TagName = "img",
             Parent = parent,
             ImageSource = string.IsNullOrEmpty(source) ? null : source,
+            Link = link,
             MarginTop = marginTop,
             MarginRight = marginRight,
             MarginBottom = marginBottom,
@@ -84,6 +85,27 @@ public sealed partial class LayoutTreeBuilder
 
     private static bool IsImageElement(IElement element)
         => string.Equals(element.LocalName, "img", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 요소가 &lt;a href&gt; 이면 기준 URL로 해석한 <see cref="LinkTarget"/> 을 반환한다. 아니면 null.
+    /// 앵커마다 새 인스턴스를 만들어 같은 href 의 다른 링크와 구분한다.
+    /// </summary>
+    private LinkTarget? GetLinkTarget(IElement element)
+    {
+        if (!string.Equals(element.LocalName, "a", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var href = element.GetAttribute("href");
+        if (string.IsNullOrWhiteSpace(href))
+        {
+            return null;
+        }
+
+        var resolved = ResolveUrl(_baseUrl, href);
+        return string.IsNullOrWhiteSpace(resolved) ? null : new LinkTarget(resolved);
+    }
 
     /// <summary>이 요소의 자손 중 대체 요소(&lt;img&gt;)가 있는지 확인한다.</summary>
     private static bool ContainsImage(IElement element)
