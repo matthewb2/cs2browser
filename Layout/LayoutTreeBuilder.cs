@@ -8,14 +8,15 @@ namespace CS2Browser.Layout;
 
 /// <summary>
 /// DOM 트리와 계산된 스타일(ComputeStyle)을 바탕으로 레이아웃 트리를 만든다.
-/// 블록 요소는 세로로 쌓이고, 텍스트/인라인 내용은 줄바꿈하며 흐른다.
-/// (개략적인 블록/인라인 플로우 구현)
+/// 요소의 display(block / inline / flex / img)에 따라 <see cref="LayoutHandlerFactory"/> 가
+/// 적절한 <see cref="ILayoutHandler"/> 를 선택해 디스패치하며,
+/// 인라인 텍스트는 문서 전체 공유 버퍼의 오프셋을 기준으로 흐른다.
 /// </summary>
-public sealed partial class LayoutTreeBuilder
+public sealed class LayoutTreeBuilder
 {
-    private const float DefaultFontSize = 16f;
+    internal const float DefaultFontSize = 16f;
     private const string DefaultFontFamily = "Malgun Gothic";
-    private const float LineHeightFactor = 1.4f;
+    internal const float LineHeightFactor = 1.4f;
 
     /// <summary>현재 레이아웃 중인 문서의 기준 URL(상대 경로 해석용).</summary>
     private string _baseUrl = string.Empty;
@@ -29,13 +30,11 @@ public sealed partial class LayoutTreeBuilder
     /// </summary>
     public ITextMeasurer? TextMeasurer { get; set; }
 
-    private static readonly HashSet<string> BlockTags = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "html", "body", "div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li",
-        "dl", "dt", "dd", "section", "header", "footer", "nav", "article", "main", "aside",
-        "form", "table", "thead", "tbody", "tfoot", "tr", "blockquote", "pre", "hr",
-        "figure", "figcaption", "fieldset", "address", "details", "summary"
-    };
+    /// <summary>상대 URL 해석에 쓰는 문서 기준 URL.</summary>
+    internal string BaseUrl => _baseUrl;
+
+    /// <summary>인라인 런들이 오프셋으로 참조하는 문서 전체 공유 버퍼.</summary>
+    internal StringBuilder TextBuffer => _textBuffer;
 
     public LayoutBox Build(IDocument document, float viewportWidth)
     {
@@ -54,7 +53,7 @@ public sealed partial class LayoutTreeBuilder
         var body = document.Body ?? document.DocumentElement;
         if (body is not null)
         {
-            var bottom = LayoutBlock(body, root, 0f, 0f, viewportWidth);
+            var bottom = LayoutElement(body, root, 0f, 0f, viewportWidth, null);
             root.Height = bottom;
         }
 
@@ -62,7 +61,16 @@ public sealed partial class LayoutTreeBuilder
         return root;
     }
 
-    private float LayoutBlock(IElement element, LayoutBox parent, float left, float top, float availableWidth, LinkTarget? inheritedLink = null)
+    /// <summary>
+    /// 요소의 display/타입에 맞는 레이아웃 핸들러를 팩토리에서 획득해 실행한다.
+    /// </summary>
+    internal float LayoutElement(
+        IElement element,
+        LayoutBox parent,
+        float left,
+        float top,
+        float availableWidth,
+        LinkTarget? inheritedLink)
     {
         var style = SafeStyle(element);
         var display = GetDisplay(style);
@@ -72,168 +80,66 @@ public sealed partial class LayoutTreeBuilder
         }
 
         var link = GetLinkTarget(element) ?? inheritedLink;
+        var handler = LayoutHandlerFactory.GetHandler(element, display);
 
-        if (IsImageElement(element))
-        {
-            return LayoutImage(element, style, parent, left, top, availableWidth, link);
-        }
+        return handler.Layout(element, style, parent, left, top, availableWidth, link, this);
+    }
 
-        var textStyle = ReadTextStyle(style);
+    /// <summary>
+    /// 테두리/여백/패딩을 적용한 내용(content) 박스를 만들어 부모에 추가한다.
+    /// 모든 박스 핸들러가 공통으로 사용하며, 내용 영역 좌상단과 폭을 반환한다.
+    /// </summary>
+    internal LayoutBox CreateContentBox(
+        IElement element,
+        ICssStyleDeclaration? style,
+        LayoutBox parent,
+        float left,
+        float top,
+        float availableWidth,
+        LinkTarget? link,
+        out float contentLeft,
+        out float contentTop,
+        out float innerWidth)
+    {
+        var edges = ReadEdges(style);
 
-        var marginTop = ParseLength(style?.GetPropertyValue("margin-top"));
-        var marginRight = ParseLength(style?.GetPropertyValue("margin-right"));
-        var marginBottom = ParseLength(style?.GetPropertyValue("margin-bottom"));
-        var marginLeft = ParseLength(style?.GetPropertyValue("margin-left"));
-        var borderTop = ParseLength(style?.GetPropertyValue("border-top-width"));
-        var borderRight = ParseLength(style?.GetPropertyValue("border-right-width"));
-        var borderBottom = ParseLength(style?.GetPropertyValue("border-bottom-width"));
-        var borderLeft = ParseLength(style?.GetPropertyValue("border-left-width"));
-        var paddingTop = ParseLength(style?.GetPropertyValue("padding-top"));
-        var paddingRight = ParseLength(style?.GetPropertyValue("padding-right"));
-        var paddingBottom = ParseLength(style?.GetPropertyValue("padding-bottom"));
-        var paddingLeft = ParseLength(style?.GetPropertyValue("padding-left"));
-
-        var contentLeft = left + marginLeft + borderLeft + paddingLeft;
-        var contentTop = top + marginTop + borderTop + paddingTop;
-        var innerWidth = MathF.Max(
+        contentLeft = left + edges.MarginLeft + edges.BorderLeft + edges.PaddingLeft;
+        contentTop = top + edges.MarginTop + edges.BorderTop + edges.PaddingTop;
+        innerWidth = MathF.Max(
             1f,
             availableWidth
-            - marginLeft - marginRight
-            - borderLeft - borderRight
-            - paddingLeft - paddingRight);
+            - edges.MarginLeft - edges.MarginRight
+            - edges.BorderLeft - edges.BorderRight
+            - edges.PaddingLeft - edges.PaddingRight);
 
         var box = new LayoutBox
         {
             TagName = element.LocalName,
-            Parent = parent,
             BackgroundColor = ReadBackground(style),
             Link = link,
-            MarginTop = marginTop,
-            MarginRight = marginRight,
-            MarginBottom = marginBottom,
-            MarginLeft = marginLeft,
-            BorderTop = borderTop,
-            BorderRight = borderRight,
-            BorderBottom = borderBottom,
-            BorderLeft = borderLeft,
-            PaddingTop = paddingTop,
-            PaddingRight = paddingRight,
-            PaddingBottom = paddingBottom,
-            PaddingLeft = paddingLeft
+            MarginTop = edges.MarginTop,
+            MarginRight = edges.MarginRight,
+            MarginBottom = edges.MarginBottom,
+            MarginLeft = edges.MarginLeft,
+            BorderTop = edges.BorderTop,
+            BorderRight = edges.BorderRight,
+            BorderBottom = edges.BorderBottom,
+            BorderLeft = edges.BorderLeft,
+            PaddingTop = edges.PaddingTop,
+            PaddingRight = edges.PaddingRight,
+            PaddingBottom = edges.PaddingBottom,
+            PaddingLeft = edges.PaddingLeft
         };
         box.X = contentLeft;
         box.Y = contentTop;
         box.Width = innerWidth;
         parent.Children.Add(box);
 
-        var cursorY = contentTop;
-        var inlineBuffer = new List<LineFragment>();
-
-        // flex-direction:row 인 컨테이너는 자식들을 가로로 배치한다.
-        if (display is "flex" or "inline-flex")
-        {
-            var flexDirection = (style?.GetPropertyValue("flex-direction") ?? string.Empty).Trim().ToLowerInvariant();
-            if (flexDirection.Length == 0 || flexDirection.StartsWith("row", StringComparison.Ordinal))
-            {
-                var flexBottom = FlowFlexRow(element, box, contentLeft, contentTop, innerWidth);
-                box.Height = MathF.Max(0f, flexBottom - contentTop);
-                return flexBottom + paddingBottom + borderBottom + marginBottom;
-            }
-        }
-
-        foreach (var child in element.ChildNodes)
-        {
-            switch (child)
-            {
-                case IElement childElement:
-                    var childDisplay = GetDisplay(SafeStyle(childElement));
-                    if (childDisplay == "none")
-                    {
-                        continue;
-                    }
-
-                    if (IsBlock(childElement, childDisplay) || IsImageElement(childElement) || ContainsImage(childElement))
-                    {
-                        if (inlineBuffer.Count > 0)
-                        {
-                            cursorY = FlowInlineContent(box, inlineBuffer, _textBuffer, contentLeft, cursorY, innerWidth);
-                            inlineBuffer.Clear();
-                        }
-
-                        cursorY = LayoutBlock(childElement, box, contentLeft, cursorY, innerWidth, link);
-                    }
-                    else
-                    {
-                        CollectInline(childElement, textStyle, inlineBuffer, _textBuffer, GetLinkTarget(childElement) ?? link);
-                    }
-                    break;
-
-                case IText textNode:
-                    AddTextRun(textNode.Data, textStyle, inlineBuffer, _textBuffer, link);
-                    break;
-            }
-        }
-
-        if (inlineBuffer.Count > 0)
-        {
-            cursorY = FlowInlineContent(box, inlineBuffer, _textBuffer, contentLeft, cursorY, innerWidth);
-        }
-
-        box.Height = MathF.Max(0f, cursorY - contentTop);
-        return cursorY + paddingBottom + borderBottom + marginBottom;
-    }
-
-    /// <summary>flex-direction:row 흐름. 자식의 내용 크기(축소)로 가로 배치한다.</summary>
-    private float FlowFlexRow(IElement element, LayoutBox box, float contentLeft, float contentTop, float innerWidth)
-    {
-        var cursorX = contentLeft;
-        var maxBottom = contentTop;
-
-        foreach (var child in element.ChildNodes)
-        {
-            if (child is not IElement childElement)
-            {
-                continue;
-            }
-
-            var childStyle = SafeStyle(childElement);
-            if (GetDisplay(childStyle) == "none")
-            {
-                continue;
-            }
-
-            var remaining = MathF.Max(1f, contentLeft + innerWidth - cursorX);
-            var childWidth = MathF.Min(EstimateIntrinsicWidth(childElement, childStyle), remaining);
-
-            var bottom = LayoutBlock(childElement, box, cursorX, contentTop, childWidth, box.Link);
-            var childBox = box.Children[^1];
-
-            cursorX = childBox.X + childBox.Width + childBox.PaddingRight + childBox.BorderRight + childBox.MarginRight;
-            maxBottom = MathF.Max(maxBottom, bottom);
-        }
-
-        return maxBottom;
-    }
-
-    /// <summary>자신의 내용만으로 결정되는 축소(shrink-to-fit) 폭을 근사 계산한다.</summary>
-    private float EstimateIntrinsicWidth(IElement element, ICssStyleDeclaration? style)
-    {
-        var horizontalEdges =
-            ParseLength(style?.GetPropertyValue("margin-left")) + ParseLength(style?.GetPropertyValue("margin-right"))
-            + ParseLength(style?.GetPropertyValue("border-left-width")) + ParseLength(style?.GetPropertyValue("border-right-width"))
-            + ParseLength(style?.GetPropertyValue("padding-left")) + ParseLength(style?.GetPropertyValue("padding-right"));
-
-        var textStyle = ReadTextStyle(style);
-        var builder = new StringBuilder();
-        CollectText(element, builder);
-        var text = builder.ToString().Trim();
-        var textWidth = MeasureWidth(text, textStyle);
-
-        return horizontalEdges + textWidth + 1f;
+        return box;
     }
 
     /// <summary>텍스트 폭을 측정한다(측정기가 있으면 정확히, 없으면 근사).</summary>
-    private float MeasureWidth(ReadOnlySpan<char> text, float fontSize, string fontFamily, bool bold, bool italic)
+    internal float MeasureWidth(ReadOnlySpan<char> text, float fontSize, string fontFamily, bool bold, bool italic)
     {
         if (TextMeasurer is not null)
         {
@@ -243,10 +149,10 @@ public sealed partial class LayoutTreeBuilder
         return ApproximateTextWidth(text, fontSize);
     }
 
-    private float MeasureWidth(string text, TextStyle style)
+    internal float MeasureWidth(string text, TextStyle style)
         => MeasureWidth(text, style.FontSize, style.FontFamily, style.Bold, style.Italic);
 
-    private static void CollectText(INode node, StringBuilder builder)
+    internal static void CollectText(INode node, StringBuilder builder)
     {
         foreach (var child in node.ChildNodes)
         {
@@ -262,287 +168,65 @@ public sealed partial class LayoutTreeBuilder
         }
     }
 
-    private static void CollectInline(IElement element, TextStyle parentStyle, List<LineFragment> fragments, StringBuilder buffer, LinkTarget? link = null)
+    /// <summary>대체 요소(replaced element)인 &lt;img&gt; 인지 확인한다.</summary>
+    internal static bool IsImageElement(IElement element)
+        => string.Equals(element.LocalName, "img", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>이 요소의 자손 중 대체 요소(&lt;img&gt;)가 있는지 확인한다.</summary>
+    internal static bool ContainsImage(IElement element)
     {
-        var name = element.LocalName.ToLowerInvariant();
-        if (name is "script" or "style" or "head" or "title" or "meta" or "link" or "template")
+        foreach (var child in element.Children)
         {
-            return;
-        }
-
-        var style = SafeStyle(element);
-        var textStyle = style is null ? parentStyle : ReadTextStyle(style);
-
-        // <br> 은 강제 줄바꿈이다.
-        if (name == "br")
-        {
-            AppendFragment("\n", textStyle, fragments, buffer, link);
-            return;
-        }
-
-        foreach (var child in element.ChildNodes)
-        {
-            switch (child)
+            if (IsImageElement(child) || ContainsImage(child))
             {
-                case IText textNode:
-                    AddTextRun(textNode.Data, textStyle, fragments, buffer, link);
-                    break;
-                case IElement childElement:
-                    if (GetDisplay(SafeStyle(childElement)) == "none")
-                    {
-                        continue;
-                    }
-
-                    CollectInline(childElement, textStyle, fragments, buffer, link);
-                    break;
+                return true;
             }
         }
+
+        return false;
     }
 
     /// <summary>
-    /// 인라인 조각들을 오프셋 기준으로 흘려보내며 줄을 만든다.
-    /// 공유 버퍼 안의 개행 문자('\n') 오프셋에서 강제 줄바꿈하고,
-    /// 줄 폭을 넘으면 자동으로 줄바꿈한다.
+    /// 요소가 &lt;a href&gt; 이면 기준 URL로 해석한 <see cref="LinkTarget"/> 을 반환한다. 아니면 null.
+    /// 앵커마다 새 인스턴스를 만들어 같은 href 의 다른 링크와 구분한다.
     /// </summary>
-    private float FlowInlineContent(
-        LayoutBox box,
-        List<LineFragment> fragments,
-        StringBuilder textBuffer,
-        float x,
-        float y,
-        float maxWidth)
+    internal LinkTarget? GetLinkTarget(IElement element)
     {
-        if (fragments.Count == 0)
+        if (!string.Equals(element.LocalName, "a", StringComparison.OrdinalIgnoreCase))
         {
-            return y;
+            return null;
         }
 
-        // 모든 조각이 참조할 공유 버퍼를 확정한다.
-        var buffer = textBuffer.ToString();
-        foreach (var fragment in fragments)
+        var href = element.GetAttribute("href");
+        if (string.IsNullOrWhiteSpace(href))
         {
-            fragment.Buffer = buffer;
+            return null;
         }
 
-        var lineHeight = LineHeightFactor * fragments
-            .Where(f => f.Length > 0)
-            .Select(f => f.FontSize)
-            .DefaultIfEmpty(DefaultFontSize)
-            .Max();
-
-        var lineTop = y;
-        var bottom = y;
-        var cursorX = x;
-        var hasContent = false;      // 현재 줄에 내용이 있는지
-        var hasAnyContent = false;   // 블록에 내용이 하나라도 있는지
-        var pendingBreaks = 0;       // 아직 반영되지 않은 강제 줄바꿈 수
-        var pendingSpace = false;    // 공백이 있었는지(공백에서 줄바꿈 가능)
-        var previousWasCjk = false;  // 직전 토큰이 CJK 글자였는지(글자 단위 줄바꿈)
-        LineBox? line = null;
-
-        void StartLine()
-        {
-            line = new LineBox { X = x, Y = lineTop, Height = lineHeight };
-            box.Lines.Add(line);
-            cursorX = x;
-            hasContent = false;
-            previousWasCjk = false;
-        }
-
-        foreach (var fragment in fragments)
-        {
-            var span = fragment.Span;
-            var index = 0;
-            while (index < span.Length)
-            {
-                var ch = span[index];
-                if (ch == '\n')
-                {
-                    pendingBreaks++;
-                    index++;
-                    continue;
-                }
-
-                if (ch == ' ')
-                {
-                    pendingSpace = true;
-                    index++;
-                    continue;
-                }
-
-                // 토큰 추출: CJK/한글은 한 글자씩, 그 외는 단어 단위.
-                var tokenStart = index;
-                var isCjk = IsCjkChar(ch);
-                if (isCjk)
-                {
-                    index++;
-                }
-                else
-                {
-                    while (index < span.Length && !IsTokenBoundary(span[index]))
-                    {
-                        index++;
-                    }
-                }
-
-                var token = span.Slice(tokenStart, index - tokenStart);
-                var tokenWidth = MeasureWidth(token, fragment.FontSize, fragment.FontFamily, fragment.Bold, fragment.Italic);
-
-                // 대기 중인 강제 줄바꿈을 반영한다. 블록 선두의 줄바꿈은 무시한다.
-                if (pendingBreaks > 0)
-                {
-                    if (hasAnyContent)
-                    {
-                        if (line is not null)
-                        {
-                            line.Width = cursorX - x;
-                        }
-
-                        lineTop += pendingBreaks * lineHeight;
-                        line = null;
-                        cursorX = x;
-                        hasContent = false;
-                    }
-
-                    pendingBreaks = 0;
-                    pendingSpace = false;
-                }
-
-                if (line is null)
-                {
-                    StartLine();
-                }
-
-                // 이 토큰 앞에서 줄을 바꿀 수 있는지:
-                //  - CJK 글자이거나, 앞에 공백이 있었거나,
-                //  - 직전 토큰이 CJK 글자였으면 (한글은 글자 단위 줄바꿈)
-                var canBreakBefore = isCjk || pendingSpace || previousWasCjk;
-                var spaceWidth = pendingSpace
-                    ? MeasureWidth(" ", fragment.FontSize, fragment.FontFamily, fragment.Bold, fragment.Italic)
-                    : 0f;
-
-                if (hasContent && canBreakBefore && cursorX + spaceWidth + tokenWidth > x + maxWidth)
-                {
-                    line!.Width = cursorX - x;
-                    lineTop += lineHeight;
-                    StartLine();
-                    spaceWidth = 0f;
-                }
-
-                if (hasContent && spaceWidth > 0f)
-                {
-                    cursorX += spaceWidth;
-                }
-
-                line!.Runs.Add(new InlineBox
-                {
-                    Text = token.ToString(),
-                    TextStart = fragment.Start + tokenStart,
-                    TextLength = token.Length,
-                    X = cursorX,
-                    Width = tokenWidth,
-                    Color = fragment.Color,
-                    FontSize = fragment.FontSize,
-                    FontFamily = fragment.FontFamily,
-                    Bold = fragment.Bold,
-                    Italic = fragment.Italic,
-                    Link = fragment.Link
-                });
-
-                cursorX += tokenWidth;
-                hasContent = true;
-                hasAnyContent = true;
-                previousWasCjk = isCjk;
-                pendingSpace = false;
-                bottom = MathF.Max(bottom, lineTop + lineHeight);
-            }
-        }
-
-        if (line is not null)
-        {
-            line.Width = cursorX - x;
-        }
-
-        return bottom;
+        var resolved = ResolveUrl(_baseUrl, href);
+        return string.IsNullOrWhiteSpace(resolved) ? null : new LinkTarget(resolved);
     }
 
-    private static void AddTextRun(string raw, TextStyle style, List<LineFragment> fragments, StringBuilder buffer, LinkTarget? link = null)
+    /// <summary>상대 URL 을 문서 기준 URL 로 해석한다.</summary>
+    internal static string ResolveUrl(string baseUrl, string? source)
     {
-        if (string.IsNullOrEmpty(raw))
+        if (string.IsNullOrWhiteSpace(source))
         {
-            return;
+            return string.Empty;
         }
 
-        var normalized = NormalizeInlineWhitespace(raw);
-        if (normalized.Length == 0)
+        if (Uri.TryCreate(source, UriKind.Absolute, out var absolute))
         {
-            return;
+            return absolute.ToString();
         }
 
-        AppendFragment(normalized, style, fragments, buffer, link);
-    }
-
-    /// <summary>공유 버퍼 뒤에 텍스트를 추가하고 그 구간을 참조하는 조각을 만든다.</summary>
-    private static void AppendFragment(string text, TextStyle style, List<LineFragment> fragments, StringBuilder buffer, LinkTarget? link = null)
-    {
-        var start = buffer.Length;
-        buffer.Append(text);
-
-        fragments.Add(new LineFragment
+        if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri)
+            && Uri.TryCreate(baseUri, source, out var combined))
         {
-            Start = start,
-            Length = text.Length,
-            Color = style.Color,
-            FontSize = style.FontSize,
-            FontFamily = style.FontFamily,
-            Bold = style.Bold,
-            Italic = style.Italic,
-            Link = link
-        });
-    }
-
-    /// <summary>
-    /// 연속된 공백/탭은 하나의 공백으로 축약하되, 개행(\r\n, \r, \n)은
-    /// 줄바꿈 기준('\n')으로 보존한다.
-    /// </summary>
-    private static string NormalizeInlineWhitespace(string value)
-    {
-        var builder = new StringBuilder(value.Length);
-        var lastWasSpace = false;
-        for (var i = 0; i < value.Length; i++)
-        {
-            var ch = value[i];
-            switch (ch)
-            {
-                case '\r':
-                    if (i + 1 < value.Length && value[i + 1] == '\n')
-                    {
-                        i++;
-                    }
-
-                    builder.Append('\n');
-                    lastWasSpace = false;
-                    break;
-                case '\n':
-                    builder.Append('\n');
-                    lastWasSpace = false;
-                    break;
-                case ' ' or '\t' or '\f' or '\v':
-                    if (!lastWasSpace)
-                    {
-                        builder.Append(' ');
-                        lastWasSpace = true;
-                    }
-
-                    break;
-                default:
-                    builder.Append(ch);
-                    lastWasSpace = false;
-                    break;
-            }
+            return combined.ToString();
         }
 
-        return builder.ToString();
+        return source;
     }
 
     private static float ApproximateTextWidth(ReadOnlySpan<char> text, float fontSize)
@@ -567,15 +251,11 @@ public sealed partial class LayoutTreeBuilder
         return width;
     }
 
-    /// <summary>단어 토큰의 경계가 되는 문자(공백/개행/CJK 글자)인지 확인한다.</summary>
-    private static bool IsTokenBoundary(char ch)
-        => ch == ' ' || ch == '\n' || IsCjkChar(ch);
-
     /// <summary>
     /// 글자 단위 줄바꿈이 가능한 CJK(한글/한자/가나) 문자인지 확인한다.
     /// 한글 음절은 물론 자모/호환 자모, 한자, 가나, 전각 문자를 포함한다.
     /// </summary>
-    private static bool IsCjkChar(char ch)
+    internal static bool IsCjkChar(char ch)
         => (ch >= '\u1100' && ch <= '\u11FF')   // 한글 자모
         || (ch >= '\u2E80' && ch <= '\u303F')   // CJK 부수/기호/구두점
         || (ch >= '\u3040' && ch <= '\u30FF')   // 히라가나/가타카나
@@ -586,25 +266,10 @@ public sealed partial class LayoutTreeBuilder
         || (ch >= '\uF900' && ch <= '\uFAFF')   // CJK 호환 한자
         || (ch >= '\uFF00' && ch <= '\uFFEF');  // 전각/반각 형태
 
-    private static bool IsBlock(IElement element, string display)
-    {
-        if (!string.IsNullOrEmpty(display))
-        {
-            if (display.StartsWith("inline", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        return BlockTags.Contains(element.LocalName);
-    }
-
-    private static string GetDisplay(ICssStyleDeclaration? style)
+    internal static string GetDisplay(ICssStyleDeclaration? style)
         => style?.GetPropertyValue("display").Trim().ToLowerInvariant() ?? string.Empty;
 
-    private static ICssStyleDeclaration? SafeStyle(IElement element)
+    internal static ICssStyleDeclaration? SafeStyle(IElement element)
     {
         try
         {
@@ -616,7 +281,7 @@ public sealed partial class LayoutTreeBuilder
         }
     }
 
-    private static TextStyle ReadTextStyle(ICssStyleDeclaration? style)
+    internal static TextStyle ReadTextStyle(ICssStyleDeclaration? style)
     {
         var result = new TextStyle
         {
@@ -660,7 +325,7 @@ public sealed partial class LayoutTreeBuilder
         return string.IsNullOrEmpty(first) ? DefaultFontFamily : first;
     }
 
-    private static Color4? ReadBackground(ICssStyleDeclaration? style)
+    internal static Color4? ReadBackground(ICssStyleDeclaration? style)
     {
         if (style is null)
         {
@@ -675,7 +340,7 @@ public sealed partial class LayoutTreeBuilder
         return null;
     }
 
-    private static float ParseLength(string? value)
+    internal static float ParseLength(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -697,12 +362,58 @@ public sealed partial class LayoutTreeBuilder
             : 0f;
     }
 
-    private struct TextStyle
+    /// <summary>박스의 여백/테두리/패딩 두께(px).</summary>
+    internal readonly struct BoxEdges
+    {
+        public float MarginTop { get; init; }
+        public float MarginRight { get; init; }
+        public float MarginBottom { get; init; }
+        public float MarginLeft { get; init; }
+        public float BorderTop { get; init; }
+        public float BorderRight { get; init; }
+        public float BorderBottom { get; init; }
+        public float BorderLeft { get; init; }
+        public float PaddingTop { get; init; }
+        public float PaddingRight { get; init; }
+        public float PaddingBottom { get; init; }
+        public float PaddingLeft { get; init; }
+    }
+
+    /// <summary>스타일에서 여백/테두리/패딩 두께를 한 번에 읽는다.</summary>
+    internal static BoxEdges ReadEdges(ICssStyleDeclaration? style) => new()
+    {
+        MarginTop = ParseLength(style?.GetPropertyValue("margin-top")),
+        MarginRight = ParseLength(style?.GetPropertyValue("margin-right")),
+        MarginBottom = ParseLength(style?.GetPropertyValue("margin-bottom")),
+        MarginLeft = ParseLength(style?.GetPropertyValue("margin-left")),
+        BorderTop = ParseLength(style?.GetPropertyValue("border-top-width")),
+        BorderRight = ParseLength(style?.GetPropertyValue("border-right-width")),
+        BorderBottom = ParseLength(style?.GetPropertyValue("border-bottom-width")),
+        BorderLeft = ParseLength(style?.GetPropertyValue("border-left-width")),
+        PaddingTop = ParseLength(style?.GetPropertyValue("padding-top")),
+        PaddingRight = ParseLength(style?.GetPropertyValue("padding-right")),
+        PaddingBottom = ParseLength(style?.GetPropertyValue("padding-bottom")),
+        PaddingLeft = ParseLength(style?.GetPropertyValue("padding-left"))
+    };
+
+    internal struct TextStyle
     {
         public float FontSize;
         public string FontFamily;
         public Color4 Color;
         public bool Bold;
         public bool Italic;
+    }
+
+    /// <summary>
+    /// 공유 텍스트 버퍼 내의 오프셋 구간과 스타일을 나타낸다.
+    /// 버퍼 자체는 <see cref="LayoutTreeBuilder"/> 가 소유하며, 런은 오프셋만 참조한다.
+    /// </summary>
+    internal struct TextRunInfo
+    {
+        public int Start;
+        public int Length;
+        public TextStyle Style;
+        public LinkTarget? Link;
     }
 }
