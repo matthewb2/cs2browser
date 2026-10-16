@@ -1,3 +1,5 @@
+using CS2Browser.Settings;
+
 namespace CS2Browser.UI;
 
 /// <summary>
@@ -6,6 +8,9 @@ namespace CS2Browser.UI;
 public partial class MainForm : Form
 {
     private const string LocalAddress = "about:local";
+
+    private static readonly string SettingsPath =
+        Path.Combine(AppContext.BaseDirectory, "Res", "settings.json");
 
     // 시작 시 네트워크 없이 바로 파싱/렌더링할 내장 문서.
     private const string DefaultDocument = """
@@ -64,9 +69,12 @@ public partial class MainForm : Form
     private readonly List<string> _history = new();
     private int _historyIndex = -1;
     private bool _syncingScrollBar;
+    private readonly AppSettings _settings;
 
     public MainForm()
     {
+        _settings = AppSettings.Load(SettingsPath);
+
         InitializeComponent();
 
         backButton.Click += async (_, _) => await GoBackAsync();
@@ -130,12 +138,9 @@ public partial class MainForm : Form
             return;
         }
 
-        if (!text.Contains("://", StringComparison.Ordinal) && !text.StartsWith("about:", StringComparison.OrdinalIgnoreCase))
-        {
-            text = "https://" + text;
-        }
-
-        await NavigateAsync(text);
+        // URL 로 보이면 이동하고, 아니면 검색어로 보고 기본 검색 엔진에서 검색한다.
+        var target = AddressResolver.Resolve(text, _settings);
+        await NavigateAsync(target);
     }
 
     /// <summary>주소를 로드한다. recordHistory 가 true 이면 히스토리에 추가한다.</summary>

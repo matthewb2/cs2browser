@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using CS2Browser.Layout;
 using CS2Browser.Network;
@@ -9,6 +10,7 @@ namespace CS2Browser.Engine;
 /// </summary>
 public sealed class BrowserEngine : IDisposable
 {
+    private const int MaxMetaRedirects = 5;
     public ResourceLoader ResourceLoader { get; }
     public DomManager DomManager { get; }
     public ScriptEngine ScriptEngine { get; }
@@ -35,8 +37,23 @@ public sealed class BrowserEngine : IDisposable
     /// <summary>주소를 로드하고 레이아웃까지 계산한다.</summary>
     public async Task NavigateAsync(string address, float viewportWidth, CancellationToken cancellationToken = default)
     {
-        CurrentAddress = address;
-        await DomManager.OpenAsync(address, cancellationToken).ConfigureAwait(true);
+        var current = address;
+
+        // 브라우저처럼 <meta http-equiv="refresh"> 리다이렉트를 따라간다.
+        for (var redirect = 0; redirect <= MaxMetaRedirects; redirect++)
+        {
+            CurrentAddress = current;
+            var document = await DomManager.OpenAsync(current, cancellationToken).ConfigureAwait(true);
+
+            var next = GetMetaRefreshTarget(document, current);
+            if (next is null || string.Equals(next, current, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            current = next;
+        }
+
         BuildLayout(viewportWidth);
     }
 
@@ -69,6 +86,92 @@ public sealed class BrowserEngine : IDisposable
         Title = document.Title;
         TitleChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>
+    /// 문서에 &lt;meta http-equiv="refresh"&gt; 가 있으면 리다이렉트 대상 절대 URL 을 반환한다.
+    /// 없으면 null. 상대 경로는 문서 URL 기준으로 해석한다.
+    /// </summary>
+    private static string? GetMetaRefreshTarget(IDocument document, string baseAddress)
+    {
+        foreach (var meta in document.QuerySelectorAll("meta[http-equiv]"))
+        {
+            var target = ResolveRefreshTarget(
+                meta.GetAttribute("http-equiv"),
+                meta.GetAttribute("content"),
+                document,
+                baseAddress);
+            if (target is not null)
+            {
+                return target;
+            }
+        }
+
+        // 스크립팅이 켜져 있으면 <noscript> 내용은 요소로 파싱되지 않고 텍스트로 남는다.
+        // 자바스크립트 없는 브라우저를 위한 대체 리다이렉트를 직접 찾아본다.
+        foreach (var noscript in document.QuerySelectorAll("noscript"))
+        {
+            var text = noscript.TextContent;
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            foreach (Match metaTag in MetaRefreshTagRegex.Matches(text))
+            {
+                var content = ContentAttributeRegex.Match(metaTag.Value);
+                var target = ResolveRefreshTarget(
+                    "refresh",
+                    content.Success ? content.Groups["value"].Value : null,
+                    document,
+                    baseAddress);
+                if (target is not null)
+                {
+                    return target;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>http-equiv/content 속성에서 리다이렉트 대상 절대 URL 을 계산한다.</summary>
+    private static string? ResolveRefreshTarget(string? httpEquiv, string? content, IDocument document, string baseAddress)
+    {
+        if (!string.Equals(httpEquiv, "refresh", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        var index = content.IndexOf("url=", StringComparison.OrdinalIgnoreCase);
+        if (index < 0)
+        {
+            return null;
+        }
+
+        var target = content[(index + 4)..].Trim().Trim('\'', '"');
+        if (target.Length == 0)
+        {
+            return null;
+        }
+
+        var baseUrl = string.IsNullOrEmpty(document.Url) ? baseAddress : document.Url;
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri)
+            || !Uri.TryCreate(baseUri, target, out var resolved))
+        {
+            return null;
+        }
+
+        return resolved.AbsoluteUri;
+    }
+
+    private static readonly Regex MetaRefreshTagRegex = new(
+        @"<meta\b[^>]*\bhttp-equiv\s*=\s*(?:""refresh""|'refresh'|refresh\b)[^>]*>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ContentAttributeRegex = new(
+        @"\bcontent\s*=\s*(?:""(?<value>[^""]*)""|'(?<value>[^']*)'|(?<value>[^\s>]+))",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public void Dispose() => ResourceLoader.Dispose();
 }

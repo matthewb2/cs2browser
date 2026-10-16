@@ -21,7 +21,19 @@ public sealed class BrowserViewControl : UserControl
 
     private float _scrollY;
     private bool _linkCursorActive;
+    private bool _textCursorActive;
     private LinkTarget? _hoveredLink;
+
+    private TextSelection? _selection;
+    private bool _selectionPending;
+    private bool _selectionDragging;
+    private int _selectionAnchorOffset;
+    private Point _selectionStartPoint;
+
+    private readonly ContextMenuStrip _contextMenu;
+    private readonly ToolStripMenuItem _copyMenuItem;
+
+    private const int DragThreshold = 3;
 
     public event EventHandler<string>? TitleChanged;
 
@@ -36,6 +48,15 @@ public sealed class BrowserViewControl : UserControl
 
     /// <summary>마우스가 링크 위로 올라가면 URL, 벗어나면 빈 문자열과 함께 발생한다.</summary>
     public event EventHandler<string>? LinkHovered;
+
+    /// <summary>선택 범위가 바뀌었을 때 발생한다(빈 선택 포함).</summary>
+    public event EventHandler? SelectionChanged;
+
+    /// <summary>현재 선택된 텍스트(선택이 없으면 빈 문자열).</summary>
+    public string SelectedText => TextSelectionReader.GetSelectedText(_engine.LayoutRoot, _selection);
+
+    /// <summary>선택 여부.</summary>
+    public bool HasSelection => _selection is { IsEmpty: false };
 
     public string? CurrentAddress => _engine.CurrentAddress;
 
@@ -54,10 +75,21 @@ public sealed class BrowserViewControl : UserControl
             ControlStyles.UserPaint
             | ControlStyles.AllPaintingInWmPaint
             | ControlStyles.Opaque
-            | ControlStyles.ResizeRedraw,
+            | ControlStyles.ResizeRedraw
+            | ControlStyles.Selectable,
             true);
+        TabStop = true;
 
         BackColor = Color.White;
+
+        _copyMenuItem = new ToolStripMenuItem("복사", null, (_, _) => CopySelectionToClipboard())
+        {
+            Enabled = false
+        };
+        _contextMenu = new ContextMenuStrip();
+        _contextMenu.Items.Add(_copyMenuItem);
+        _contextMenu.Opening += (_, _) => _copyMenuItem.Enabled = HasSelection;
+        ContextMenuStrip = _contextMenu;
 
         _engine.LayoutUpdated += OnLayoutUpdated;
         _engine.TitleChanged += OnTitleChanged;
@@ -66,6 +98,7 @@ public sealed class BrowserViewControl : UserControl
     /// <summary>주소를 로드하고 다시 그린다.</summary>
     public async Task NavigateAsync(string address)
     {
+        ClearSelection();
         try
         {
             await _engine.NavigateAsync(address, Math.Max(1, ClientSize.Width));
@@ -82,6 +115,7 @@ public sealed class BrowserViewControl : UserControl
     /// <summary>네트워크 없이 HTML 문자열을 파싱해 화면에 그린다.</summary>
     public async Task LoadHtmlAsync(string html)
     {
+        ClearSelection();
         try
         {
             await _engine.LoadHtmlAsync(html, Math.Max(1, ClientSize.Width));
@@ -124,6 +158,16 @@ public sealed class BrowserViewControl : UserControl
     {
         var documentY = clientPoint.Y + _scrollY;
         return HitTestLink(_engine.LayoutRoot, clientPoint.X, documentY, out link);
+    }
+
+    /// <summary>
+    /// 주어진 클라이언트 좌표에 대응하는 텍스트 버퍼 오프셋을 찾는다.
+    /// 스크롤 오프셋을 반영해 문서 좌표로 변환한 뒤 히트 테스트한다.
+    /// </summary>
+    public bool TryGetTextOffsetAt(Point clientPoint, out int offset)
+    {
+        var documentY = clientPoint.Y + _scrollY;
+        return TextSelectionReader.TryHitTest(_engine.LayoutRoot, clientPoint.X, documentY, _textRenderer, out offset);
     }
 
     private static bool HitTestLink(LayoutBox? box, float x, float y, out LinkTarget? link)
@@ -203,16 +247,58 @@ public sealed class BrowserViewControl : UserControl
         }
     }
 
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        Focus();
+
+        if (e.Button != MouseButtons.Left)
+        {
+            return;
+        }
+
+        _selectionStartPoint = e.Location;
+        _selectionDragging = false;
+
+        // 새 지점을 누르면 기존 선택을 해제하고 앵커 후보를 기록한다.
+        ClearSelection();
+        _selectionPending = TryGetTextOffsetAt(e.Location, out _selectionAnchorOffset);
+    }
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
 
-        var overLink = TryGetLinkAt(e.Location, out var link);
+        // 왼쪽 버튼을 누른 채 일정 거리 이상 움직이면 텍스트 선택을 시작/갱신한다.
+        if ((e.Button & MouseButtons.Left) != 0 && _selectionPending)
+        {
+            if (!_selectionDragging
+                && Math.Abs(e.X - _selectionStartPoint.X) + Math.Abs(e.Y - _selectionStartPoint.Y) > DragThreshold)
+            {
+                _selectionDragging = true;
+                _selection = new TextSelection(_selectionAnchorOffset, _selectionAnchorOffset);
+            }
 
-        if (overLink != _linkCursorActive)
+            if (_selectionDragging && TryGetTextOffsetAt(e.Location, out var focus))
+            {
+                _selection!.Focus = focus;
+                SuppressLinkHover();
+                Cursor = Cursors.IBeam;
+                Invalidate();
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            return;
+        }
+
+        var overLink = TryGetLinkAt(e.Location, out var link);
+        var overText = overLink || TryGetTextOffsetAt(e.Location, out _);
+
+        if (overLink != _linkCursorActive || overText != _textCursorActive)
         {
             _linkCursorActive = overLink;
-            Cursor = overLink ? Cursors.Hand : Cursors.Default;
+            _textCursorActive = overText;
+            Cursor = overLink ? Cursors.Hand : overText ? Cursors.IBeam : Cursors.Default;
         }
 
         if (!ReferenceEquals(link, _hoveredLink))
@@ -228,9 +314,10 @@ public sealed class BrowserViewControl : UserControl
     {
         base.OnMouseLeave(e);
 
-        if (_linkCursorActive)
+        if (_linkCursorActive || _textCursorActive)
         {
             _linkCursorActive = false;
+            _textCursorActive = false;
             Cursor = Cursors.Default;
         }
 
@@ -247,11 +334,92 @@ public sealed class BrowserViewControl : UserControl
     {
         base.OnMouseUp(e);
 
-        if (e.Button == MouseButtons.Left
-            && TryGetLinkAt(e.Location, out var link)
-            && link is not null)
+        if (e.Button != MouseButtons.Left)
+        {
+            return;
+        }
+
+        if (_selectionDragging)
+        {
+            _selectionDragging = false;
+            _selectionPending = false;
+
+            if (_selection is { IsEmpty: true })
+            {
+                _selection = null;
+            }
+
+            Invalidate();
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        _selectionPending = false;
+
+        // 드래그가 아니면 일반 클릭으로 보고 링크 이동을 처리한다.
+        if (TryGetLinkAt(e.Location, out var link) && link is not null)
         {
             LinkClicked?.Invoke(this, link.Url);
+        }
+    }
+
+    /// <summary>선택을 지운다(선택이 있었다면 SelectionChanged 발생).</summary>
+    public void ClearSelection()
+    {
+        if (_selection is null)
+        {
+            return;
+        }
+
+        _selection = null;
+        if (IsHandleCreated && !IsDisposed)
+        {
+            Invalidate();
+        }
+
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>선택된 텍스트를 클립보드에 복사한다. 복사했으면 true.</summary>
+    public bool CopySelectionToClipboard()
+    {
+        var text = SelectedText;
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        try
+        {
+            Clipboard.SetText(text);
+            return true;
+        }
+        catch (Exception)
+        {
+            // 다른 프로세스가 클립보드를 점유 중인 경우 등.
+            return false;
+        }
+    }
+
+    private void SuppressLinkHover()
+    {
+        if (_hoveredLink is null)
+        {
+            return;
+        }
+
+        _hoveredLink = null;
+        LinkHovered?.Invoke(this, string.Empty);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        if (e.Control && e.KeyCode == Keys.C && CopySelectionToClipboard())
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
         }
     }
 
@@ -303,7 +471,7 @@ public sealed class BrowserViewControl : UserControl
         var layoutRoot = _engine.LayoutRoot;
         if (layoutRoot is not null)
         {
-            _paintEngine.Paint(_direct2D.RenderTarget, _direct2D, layoutRoot);
+            _paintEngine.Paint(_direct2D.RenderTarget, _direct2D, layoutRoot, _selection);
 
             if (_hoveredLink is not null)
             {
@@ -403,6 +571,7 @@ public sealed class BrowserViewControl : UserControl
         if (disposing)
         {
             DisposeGraphics();
+            _contextMenu.Dispose();
             _engine.Dispose();
         }
 

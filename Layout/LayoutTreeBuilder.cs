@@ -20,6 +20,9 @@ public sealed partial class LayoutTreeBuilder
     /// <summary>현재 레이아웃 중인 문서의 기준 URL(상대 경로 해석용).</summary>
     private string _baseUrl = string.Empty;
 
+    /// <summary>문서 전체의 인라인 텍스트 공유 버퍼. 모든 런의 오프셋이 이 버퍼 기준이다.</summary>
+    private readonly StringBuilder _textBuffer = new();
+
     /// <summary>
     /// 텍스트 폭 측정기. 지정하지 않으면 근사치를 사용한다.
     /// 실제 렌더러(DirectWrite)를 지정하면 렌더링과 동일한 메트릭으로 배치한다.
@@ -37,6 +40,7 @@ public sealed partial class LayoutTreeBuilder
     public LayoutBox Build(IDocument document, float viewportWidth)
     {
         _baseUrl = document.Url ?? string.Empty;
+        _textBuffer.Clear();
 
         var root = new LayoutBox
         {
@@ -54,6 +58,7 @@ public sealed partial class LayoutTreeBuilder
             root.Height = bottom;
         }
 
+        root.TextBuffer = _textBuffer.ToString();
         return root;
     }
 
@@ -123,7 +128,6 @@ public sealed partial class LayoutTreeBuilder
 
         var cursorY = contentTop;
         var inlineBuffer = new List<LineFragment>();
-        var textBuffer = new StringBuilder();
 
         // flex-direction:row 인 컨테이너는 자식들을 가로로 배치한다.
         if (display is "flex" or "inline-flex")
@@ -152,7 +156,7 @@ public sealed partial class LayoutTreeBuilder
                     {
                         if (inlineBuffer.Count > 0)
                         {
-                            cursorY = FlowInlineContent(box, inlineBuffer, textBuffer, contentLeft, cursorY, innerWidth);
+                            cursorY = FlowInlineContent(box, inlineBuffer, _textBuffer, contentLeft, cursorY, innerWidth);
                             inlineBuffer.Clear();
                         }
 
@@ -160,19 +164,19 @@ public sealed partial class LayoutTreeBuilder
                     }
                     else
                     {
-                        CollectInline(childElement, textStyle, inlineBuffer, textBuffer, GetLinkTarget(childElement) ?? link);
+                        CollectInline(childElement, textStyle, inlineBuffer, _textBuffer, GetLinkTarget(childElement) ?? link);
                     }
                     break;
 
                 case IText textNode:
-                    AddTextRun(textNode.Data, textStyle, inlineBuffer, textBuffer, link);
+                    AddTextRun(textNode.Data, textStyle, inlineBuffer, _textBuffer, link);
                     break;
             }
         }
 
         if (inlineBuffer.Count > 0)
         {
-            cursorY = FlowInlineContent(box, inlineBuffer, textBuffer, contentLeft, cursorY, innerWidth);
+            cursorY = FlowInlineContent(box, inlineBuffer, _textBuffer, contentLeft, cursorY, innerWidth);
         }
 
         box.Height = MathF.Max(0f, cursorY - contentTop);
@@ -433,6 +437,8 @@ public sealed partial class LayoutTreeBuilder
                 line!.Runs.Add(new InlineBox
                 {
                     Text = token.ToString(),
+                    TextStart = fragment.Start + tokenStart,
+                    TextLength = token.Length,
                     X = cursorX,
                     Width = tokenWidth,
                     Color = fragment.Color,

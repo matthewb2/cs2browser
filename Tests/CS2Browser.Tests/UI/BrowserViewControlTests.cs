@@ -113,4 +113,149 @@ public sealed class BrowserViewControlTests
             StringAssert.Contains(link!.Url, "deep.html");
         });
     }
+
+    [TestMethod]
+    public void BrowserViewControl_TryGetTextOffsetAt_ReturnsOffsetOverText()
+    {
+        StaRunner.Run(() =>
+        {
+            using var form = new Form { ClientSize = new System.Drawing.Size(400, 200) };
+            var view = new BrowserViewControl { Dock = DockStyle.Fill };
+            form.Controls.Add(view);
+            _ = form.Handle;
+            _ = view.Handle;
+
+            view.LoadHtmlAsync("<html><body style='margin:0'><p style='margin:0'>Hello</p></body></html>")
+                .GetAwaiter().GetResult();
+
+            Assert.IsTrue(view.TryGetTextOffsetAt(new Point(1, 5), out var offset),
+                "텍스트 위 좌표에서 오프셋을 찾지 못했습니다.");
+            Assert.AreEqual(0, offset);
+        });
+    }
+
+    [TestMethod]
+    public void BrowserViewControl_SelectionAndCopy_NotAvailableWithoutSelection()
+    {
+        StaRunner.Run(() =>
+        {
+            using var form = new Form { ClientSize = new System.Drawing.Size(400, 200) };
+            var view = new BrowserViewControl { Dock = DockStyle.Fill };
+            form.Controls.Add(view);
+            _ = form.Handle;
+            _ = view.Handle;
+
+            view.LoadHtmlAsync("<html><body style='margin:0'><p style='margin:0'>Hello</p></body></html>")
+                .GetAwaiter().GetResult();
+
+            Assert.IsFalse(view.HasSelection);
+            Assert.AreEqual(string.Empty, view.SelectedText);
+            Assert.IsFalse(view.CopySelectionToClipboard());
+        });
+    }
+
+    [TestMethod]
+    public void BrowserViewControl_DragSelectsText_AndCopyWorks()
+    {
+        StaRunner.Run(() =>
+        {
+            using var form = new Form { ClientSize = new System.Drawing.Size(400, 200) };
+            var view = new BrowserViewControl { Dock = DockStyle.Fill };
+            form.Controls.Add(view);
+            _ = form.Handle;
+            _ = view.Handle;
+
+            view.LoadHtmlAsync(
+                "<html><body style='margin:0'><p style='margin:0'>Hello World</p></body></html>")
+                .GetAwaiter().GetResult();
+
+            // 드래그: 텍스트 왼쪽에서 오른쪽으로.
+            RaiseMouseDown(view, new Point(1, 5));
+            RaiseMouseMove(view, new Point(60, 5), MouseButtons.Left);
+            RaiseMouseUp(view, new Point(60, 5));
+
+            Assert.IsTrue(view.HasSelection, "드래그 후 선택이 있어야 합니다.");
+            Assert.IsTrue(view.SelectedText.StartsWith("Hello", StringComparison.Ordinal),
+                $"선택 텍스트: '{view.SelectedText}'");
+
+            Assert.IsTrue(view.CopySelectionToClipboard(), "클립보드 복사에 실패했습니다.");
+            Assert.AreEqual(view.SelectedText, Clipboard.GetText());
+
+            // ClearSelection 후에는 선택이 비어야 한다.
+            view.ClearSelection();
+            Assert.IsFalse(view.HasSelection);
+        });
+    }
+
+    [TestMethod]
+    public void BrowserViewControl_DragOverLink_DoesNotNavigate()
+    {
+        StaRunner.Run(() =>
+        {
+            using var form = new Form { ClientSize = new System.Drawing.Size(400, 200) };
+            var view = new BrowserViewControl { Dock = DockStyle.Fill };
+            form.Controls.Add(view);
+            _ = form.Handle;
+            _ = view.Handle;
+
+            view.LoadHtmlAsync(
+                "<html><body style='margin:0'><p style='margin:0'><a href='target.html'>LinkText</a></p></body></html>")
+                .GetAwaiter().GetResult();
+
+            var navigated = false;
+            view.LinkClicked += (_, _) => navigated = true;
+
+            // 링크 텍스트 위에서 드래그하면 이동이 아니라 선택이 되어야 한다.
+            RaiseMouseDown(view, new Point(1, 5));
+            RaiseMouseMove(view, new Point(40, 5), MouseButtons.Left);
+            RaiseMouseUp(view, new Point(40, 5));
+
+            Assert.IsFalse(navigated, "드래그 중에는 링크로 이동하면 안 됩니다.");
+            Assert.IsTrue(view.HasSelection);
+        });
+    }
+
+    [TestMethod]
+    public void BrowserViewControl_ClickOnLink_Navigates()
+    {
+        StaRunner.Run(() =>
+        {
+            using var form = new Form { ClientSize = new System.Drawing.Size(400, 200) };
+            var view = new BrowserViewControl { Dock = DockStyle.Fill };
+            form.Controls.Add(view);
+            _ = form.Handle;
+            _ = view.Handle;
+
+            view.LoadHtmlAsync(
+                "<html><body style='margin:0'><p style='margin:0'><a href='target.html'>LinkText</a></p></body></html>")
+                .GetAwaiter().GetResult();
+
+            string? navigated = null;
+            view.LinkClicked += (_, url) => navigated = url;
+
+            // 이동 없는 단순 클릭은 링크 이동을 트리거해야 한다.
+            RaiseMouseDown(view, new Point(1, 5));
+            RaiseMouseUp(view, new Point(1, 5));
+
+            Assert.IsNotNull(navigated);
+            StringAssert.Contains(navigated!, "target.html");
+        });
+    }
+
+    private static void RaiseMouseDown(BrowserViewControl view, Point point)
+        => InvokeProtected(view, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
+
+    private static void RaiseMouseMove(BrowserViewControl view, Point point, MouseButtons buttons)
+        => InvokeProtected(view, "OnMouseMove", new MouseEventArgs(buttons, 0, point.X, point.Y, 0));
+
+    private static void RaiseMouseUp(BrowserViewControl view, Point point)
+        => InvokeProtected(view, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
+
+    private static void InvokeProtected(BrowserViewControl view, string method, MouseEventArgs args)
+    {
+        var info = typeof(BrowserViewControl).GetMethod(
+            method,
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        info!.Invoke(view, new object[] { args });
+    }
 }

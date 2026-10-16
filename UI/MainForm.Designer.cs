@@ -107,6 +107,7 @@ partial class MainForm
             | System.Windows.Forms.AnchorStyles.Right)));
         this.addressBar.Location = new System.Drawing.Point(80, 7);
         this.addressBar.Name = "addressBar";
+        this.addressBar.PlaceholderText = "검색어 또는 주소 입력";
         this.addressBar.Size = new System.Drawing.Size(864, 23);
         this.addressBar.TabIndex = 2;
         // 
