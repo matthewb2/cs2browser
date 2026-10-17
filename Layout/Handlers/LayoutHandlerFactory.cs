@@ -24,6 +24,11 @@ internal static class LayoutHandlerFactory
             return ImageLayoutHandler.Instance;
         }
 
+        if (IsTextInputElement(element))
+        {
+            return InputLayoutHandler.Instance;
+        }
+
         if (IsFlex(display))
         {
             return FlexLayoutHandler.Instance;
@@ -35,6 +40,57 @@ internal static class LayoutHandlerFactory
         }
 
         return BlockLayoutHandler.Instance;
+    }
+
+    /// <summary>text 입력 요소인지 확인한다.</summary>
+    private static bool IsTextInputElement(IElement element)
+    {
+        var name = element.LocalName;
+        if (string.Equals(name, "textarea", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(name, "input", StringComparison.OrdinalIgnoreCase))
+        {
+            var type = element.GetAttribute("type");
+            if (string.IsNullOrWhiteSpace(type))
+            {
+                return true;
+            }
+
+            if (string.Equals(type, "text", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(type, "password", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(type, "search", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(type, "email", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(type, "url", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(type, "tel", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>display 가 flex 컨테이너(flex / inline-flex)인지 확인한다.</summary>
@@ -52,8 +108,17 @@ internal static class LayoutHandlerFactory
     /// 이미지/이미지 포함 요소/flex 컨테이너는 박스를 만들므로 제외한다.
     /// </summary>
     public static bool IsInlineChild(IElement element, string display)
-        => !LayoutTreeBuilder.IsImageElement(element)
-        && !LayoutTreeBuilder.ContainsImage(element)
-        && !IsFlex(display)
-        && IsInlineLevel(element, display);
+    {
+        var name = element.LocalName;
+        if (string.Equals(name, "input", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "textarea", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !LayoutTreeBuilder.IsImageElement(element)
+            && !LayoutTreeBuilder.ContainsImage(element)
+            && !IsFlex(display)
+            && IsInlineLevel(element, display);
+    }
 }

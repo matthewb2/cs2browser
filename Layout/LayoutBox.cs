@@ -58,6 +58,30 @@ public sealed class LayoutBox
     public float PaddingBoxTop => Y - PaddingTop;
     public float PaddingBoxWidth => Width + PaddingLeft + PaddingRight;
     public float PaddingBoxHeight => Height + PaddingTop + PaddingBottom;
+
+    /// <summary>텍스트 입력 상자(&lt;input&gt; / &lt;textarea&gt;) 여부.</summary>
+    public bool IsTextInput { get; set; }
+
+    /// <summary>&lt;input&gt;/&lt;textarea&gt;에 입력된 현재 텍스트.</summary>
+    public string? InputText { get; set; }
+
+    /// <summary>현재 커서 위치(문자 인덱스).</summary>
+    public int CaretIndex { get; set; }
+
+    /// <summary>포커스가 있는지 여부.</summary>
+    public bool IsFocused { get; set; }
+
+    /// <summary>커서가 깜빡임 상태(렌더링에만 사용).</summary>
+    public bool IsCaretVisible { get; set; }
+
+    /// <summary>입력 상자 글꼴 크기.</summary>
+    public float FontSize { get; set; } = 14f;
+
+    /// <summary>입력 상자 글꼴 패밀리.</summary>
+    public string? FontFamily { get; set; } = "Malgun Gothic";
+
+    /// <summary>입력 상자 글자 색.</summary>
+    public Color4? TextColor { get; set; }
 }
 
 /// <summary>한 줄의 텍스트 정보. InlineBox 들을 담는다.</summary>

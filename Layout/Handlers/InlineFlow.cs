@@ -65,6 +65,12 @@ internal sealed class InlineFlow
             return;
         }
 
+        if (name is "input" or "textarea")
+        {
+            LayoutBoxChild(element, link);
+            return;
+        }
+
         var style = LayoutTreeBuilder.SafeStyle(element);
         var display = LayoutTreeBuilder.GetDisplay(style);
         if (display == "none")
