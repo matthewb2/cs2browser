@@ -84,6 +84,11 @@ public sealed class PaintEngine : IDisposable
             PaintSelectionInBox(target, context, box, selection);
         }
 
+        if (box.IsTextInput)
+        {
+            PaintTextInputBox(target, context, box);
+        }
+
         foreach (var line in box.Lines)
         {
             foreach (var run in line.Runs)
@@ -118,6 +123,79 @@ public sealed class PaintEngine : IDisposable
     /// 런 일부만 선택된 경우 측정기로 접두 폭을 계산해 정확한 경계를 구하고,
     /// 단어 사이의 공백도 선택 범위에 포함되면 하나의 연속된 사각형으로 채운다.
     /// </summary>
+    /// <summary>
+    /// 텍스트 입력 상자(&lt;input&gt;/&lt;textarea&gt;)를 그린다. 테두리 + 값 텍스트 + 캐럿.
+    /// 캐럿은 포커스가 있고 깜빡임이 켜져 있을 때만 표시한다.
+    /// </summary>
+    private void PaintTextInputBox(ID2D1RenderTarget target, Direct2DContext context, LayoutBox box)
+    {
+        PaintInputBorder(target, context, box);
+
+        var fontSize = box.FontSize > 0f ? box.FontSize : 14f;
+        var lineHeight = fontSize * 1.4f;
+        var textY = box.Y + MathF.Max(0f, (box.Height - lineHeight) * 0.5f);
+        var color = box.TextColor ?? new DColor(0f, 0f, 0f, 1f);
+
+        var text = TextInputReader.DisplayText(box);
+        if (!string.IsNullOrEmpty(text))
+        {
+            _textRenderer.DrawText(
+                target,
+                text,
+                box.X + 1f,
+                textY,
+                MathF.Max(1f, box.Width - 2f),
+                lineHeight,
+                context.GetBrush(color),
+                box.FontFamily ?? "Malgun Gothic",
+                fontSize,
+                false,
+                false);
+        }
+
+        if (box.IsFocused && box.IsCaretVisible)
+        {
+            var caretX = TextInputReader.CaretX(box, _textRenderer);
+            var caret = new DRect(caretX, textY, 1.5f, lineHeight);
+            target.FillRectangle(caret, context.GetBrush(color));
+        }
+    }
+
+    /// <summary>입력 상자의 테두리를 변별로 채워 그린다.</summary>
+    private static void PaintInputBorder(ID2D1RenderTarget target, Direct2DContext context, LayoutBox box)
+    {
+        if (box.BorderTop <= 0f && box.BorderRight <= 0f && box.BorderBottom <= 0f && box.BorderLeft <= 0f)
+        {
+            return;
+        }
+
+        var brush = context.GetBrush(box.BorderColor ?? new DColor(0.47f, 0.47f, 0.47f, 1f));
+        var left = box.BorderBoxLeft;
+        var top = box.BorderBoxTop;
+        var width = box.BorderBoxWidth;
+        var height = box.BorderBoxHeight;
+
+        if (box.BorderTop > 0f)
+        {
+            target.FillRectangle(new DRect(left, top, width, box.BorderTop), brush);
+        }
+
+        if (box.BorderBottom > 0f)
+        {
+            target.FillRectangle(new DRect(left, top + height - box.BorderBottom, width, box.BorderBottom), brush);
+        }
+
+        if (box.BorderLeft > 0f)
+        {
+            target.FillRectangle(new DRect(left, top, box.BorderLeft, height), brush);
+        }
+
+        if (box.BorderRight > 0f)
+        {
+            target.FillRectangle(new DRect(left + width - box.BorderRight, top, box.BorderRight, height), brush);
+        }
+    }
+
     private void PaintSelectionInBox(ID2D1RenderTarget target, Direct2DContext context, LayoutBox box, TextSelection selection)
     {
         var brush = context.GetBrush(SelectionColor);

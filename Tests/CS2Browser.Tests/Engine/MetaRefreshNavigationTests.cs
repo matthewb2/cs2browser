@@ -53,6 +53,31 @@ public sealed class MetaRefreshNavigationTests
     }
 
     [TestMethod]
+    public async Task NavigateAsync_FollowsNoScriptMetaRefresh_WithEncodedQuotes()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            // 덕덕고처럼 noscript 안에서 URL이 &quot; 엔티티로 감싸진 경우.
+            WritePage(dir, "start.html",
+                "<html><head><noscript><meta http-equiv=\"refresh\" content=\"0;URL=&quot;target.html&quot;\"></noscript></head>"
+                + "<body>start</body></html>");
+            WritePage(dir, "target.html",
+                "<html><head><title>Target</title></head><body>encoded-content</body></html>");
+
+            using var engine = new BrowserEngine();
+            await engine.NavigateAsync(Url(dir, "start.html"), 800f);
+
+            StringAssert.EndsWith(engine.CurrentAddress!, "target.html");
+            StringAssert.Contains(engine.LayoutRoot?.TextBuffer ?? string.Empty, "encoded-content");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
     public async Task NavigateAsync_WithoutMetaRefresh_StaysOnRequestedPage()
     {
         var dir = CreateTempDir();

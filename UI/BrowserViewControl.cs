@@ -18,11 +18,16 @@ public sealed class BrowserViewControl : UserControl
     private DirectWriteTextRenderer? _textRenderer;
     private PaintEngine? _paintEngine;
     private Exception? _initializationError;
+    private Exception? _renderError;
 
     private float _scrollY;
     private bool _linkCursorActive;
     private bool _textCursorActive;
+    private bool _inputCursorActive;
     private LinkTarget? _hoveredLink;
+
+    private LayoutBox? _focusedInput;
+    private System.Windows.Forms.Timer? _caretTimer;
 
     private TextSelection? _selection;
     private bool _selectionPending;
@@ -93,12 +98,22 @@ public sealed class BrowserViewControl : UserControl
 
         _engine.LayoutUpdated += OnLayoutUpdated;
         _engine.TitleChanged += OnTitleChanged;
+
+        // IME(한글 조합)를 받도록 한다.
+        ImeMode = ImeMode.Alpha;
+
+        // 캐럿 깜빡임 타이머. 시스템 표준에 가까운 주기(약 530ms)로 토글한다.
+        _caretTimer = new System.Windows.Forms.Timer { Interval = 530 };
+        _caretTimer.Tick += (_, _) => ToggleCaret();
     }
+
+    protected override bool CanEnableIme => true;
 
     /// <summary>주소를 로드하고 다시 그린다.</summary>
     public async Task NavigateAsync(string address)
     {
         ClearSelection();
+        ClearInputFocus();
         try
         {
             await _engine.NavigateAsync(address, Math.Max(1, ClientSize.Width));
@@ -116,6 +131,7 @@ public sealed class BrowserViewControl : UserControl
     public async Task LoadHtmlAsync(string html)
     {
         ClearSelection();
+        ClearInputFocus();
         try
         {
             await _engine.LoadHtmlAsync(html, Math.Max(1, ClientSize.Width));
@@ -168,6 +184,16 @@ public sealed class BrowserViewControl : UserControl
     {
         var documentY = clientPoint.Y + _scrollY;
         return TextSelectionReader.TryHitTest(_engine.LayoutRoot, clientPoint.X, documentY, _textRenderer, out offset);
+    }
+
+    /// <summary>
+    /// 주어진 클라이언트 좌표에 있는 텍스트 입력 상자(&lt;input&gt;/&lt;textarea&gt;)를 찾는다.
+    /// 스크롤 오프셋을 반영해 문서 좌표로 변환한 뒤 히트 테스트한다.
+    /// </summary>
+    public bool TryGetInputAt(Point clientPoint, out LayoutBox? input)
+    {
+        var documentY = clientPoint.Y + _scrollY;
+        return TextInputReader.TryHitTest(_engine.LayoutRoot, clientPoint.X, documentY, out input);
     }
 
     private static bool HitTestLink(LayoutBox? box, float x, float y, out LinkTarget? link)
@@ -257,6 +283,18 @@ public sealed class BrowserViewControl : UserControl
             return;
         }
 
+        // 입력 상자를 클릭하면 텍스트 선택 대신 캐럿을 옮긴다.
+        if (TryGetInputAt(e.Location, out var input) && input is not null)
+        {
+            _selectionDragging = false;
+            _selectionPending = false;
+            ClearSelection();
+            FocusInput(input, TextInputReader.CaretIndexFromX(input, e.Location.X, _textRenderer));
+            return;
+        }
+
+        ClearInputFocus();
+
         _selectionStartPoint = e.Location;
         _selectionDragging = false;
 
@@ -293,12 +331,14 @@ public sealed class BrowserViewControl : UserControl
 
         var overLink = TryGetLinkAt(e.Location, out var link);
         var overText = overLink || TryGetTextOffsetAt(e.Location, out _);
+        var overInput = TryGetInputAt(e.Location, out _);
 
-        if (overLink != _linkCursorActive || overText != _textCursorActive)
+        if (overLink != _linkCursorActive || overText != _textCursorActive || overInput != _inputCursorActive)
         {
             _linkCursorActive = overLink;
             _textCursorActive = overText;
-            Cursor = overLink ? Cursors.Hand : overText ? Cursors.IBeam : Cursors.Default;
+            _inputCursorActive = overInput;
+            Cursor = overLink ? Cursors.Hand : overInput || overText ? Cursors.IBeam : Cursors.Default;
         }
 
         if (!ReferenceEquals(link, _hoveredLink))
@@ -314,10 +354,11 @@ public sealed class BrowserViewControl : UserControl
     {
         base.OnMouseLeave(e);
 
-        if (_linkCursorActive || _textCursorActive)
+        if (_linkCursorActive || _textCursorActive || _inputCursorActive)
         {
             _linkCursorActive = false;
             _textCursorActive = false;
+            _inputCursorActive = false;
             Cursor = Cursors.Default;
         }
 
@@ -416,10 +457,226 @@ public sealed class BrowserViewControl : UserControl
     {
         base.OnKeyDown(e);
 
+        if (_focusedInput is not null && HandleInputKeyDown(e))
+        {
+            return;
+        }
+
         if (e.Control && e.KeyCode == Keys.C && CopySelectionToClipboard())
         {
             e.Handled = true;
             e.SuppressKeyPress = true;
+        }
+    }
+
+    protected override void OnKeyPress(KeyPressEventArgs e)
+    {
+        base.OnKeyPress(e);
+
+        // 입력 상자에 포커스가 있고, IME 조합 중이 아닐 때만 직접 삽입한다.
+        if (_focusedInput is null || !string.IsNullOrEmpty(_focusedInput.CompositionText))
+        {
+            return;
+        }
+
+        if (char.IsControl(e.KeyChar))
+        {
+            return;
+        }
+
+        var text = _focusedInput.InputText ?? string.Empty;
+        var index = Math.Clamp(_focusedInput.CaretIndex, 0, text.Length);
+        _focusedInput.InputText = text.Insert(index, e.KeyChar.ToString());
+        _focusedInput.CaretIndex = index + 1;
+        e.Handled = true;
+        StartCaretBlink();
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        base.OnLostFocus(e);
+        ClearInputFocus();
+    }
+
+    /// <summary>포커스된 입력 상자의 캐럿 이동/삭제 키를 처리한다. 처리했으면 true.</summary>
+    private bool HandleInputKeyDown(KeyEventArgs e)
+    {
+        var box = _focusedInput!;
+        var text = box.InputText ?? string.Empty;
+        var composing = !string.IsNullOrEmpty(box.CompositionText);
+
+        switch (e.KeyCode)
+        {
+            case Keys.Left:
+                if (!composing && box.CaretIndex > 0)
+                {
+                    box.CaretIndex--;
+                }
+
+                break;
+
+            case Keys.Right:
+                if (!composing && box.CaretIndex < text.Length)
+                {
+                    box.CaretIndex++;
+                }
+
+                break;
+
+            case Keys.Home:
+                if (!composing)
+                {
+                    box.CaretIndex = 0;
+                }
+
+                break;
+
+            case Keys.End:
+                if (!composing)
+                {
+                    box.CaretIndex = text.Length;
+                }
+
+                break;
+
+            case Keys.Back:
+                if (!composing && box.CaretIndex > 0)
+                {
+                    var index = box.CaretIndex;
+                    box.InputText = text.Remove(index - 1, 1);
+                    box.CaretIndex = index - 1;
+                }
+
+                break;
+
+            case Keys.Delete:
+                if (!composing && box.CaretIndex < text.Length)
+                {
+                    box.InputText = text.Remove(box.CaretIndex, 1);
+                }
+
+                break;
+
+            default:
+                return false;
+        }
+
+        e.Handled = true;
+        e.SuppressKeyPress = true;
+        StartCaretBlink();
+        return true;
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (_focusedInput is not null
+            && (m.Msg == InputMethod.WmImeStartComposition || m.Msg == InputMethod.WmImeComposition))
+        {
+            HandleImeMessage(ref m);
+            return;
+        }
+
+        base.WndProc(ref m);
+    }
+
+    /// <summary>IME 조합 시작/갱신 메시지를 처리해 입력 상자에 반영한다.</summary>
+    private void HandleImeMessage(ref Message m)
+    {
+        var box = _focusedInput!;
+
+        if (m.Msg == InputMethod.WmImeStartComposition)
+        {
+            PositionCompositionWindow(box);
+            base.WndProc(ref m);
+            return;
+        }
+
+        var flags = m.LParam.ToInt32();
+        if ((flags & InputMethod.GcsResultStr) != 0)
+        {
+            InputMethod.CommitResult(Handle, box);
+        }
+        else if ((flags & InputMethod.GcsCompStr) != 0)
+        {
+            InputMethod.UpdateComposition(Handle, box);
+        }
+
+        StartCaretBlink();
+    }
+
+    private void PositionCompositionWindow(LayoutBox box)
+    {
+        var fontSize = box.FontSize > 0f ? box.FontSize : 14f;
+        var lineHeight = fontSize * 1.4f;
+        var caretX = TextInputReader.CaretX(box, _textRenderer);
+        var caretY = box.Y + MathF.Max(0f, (box.Height - lineHeight) * 0.5f);
+        InputMethod.SetCompositionWindow(
+            Handle,
+            (int)MathF.Round(caretX),
+            (int)MathF.Round(caretY - _scrollY));
+    }
+
+    /// <summary>입력 상자에 포커스하고 캐럿을 지정 위치로 옮긴다.</summary>
+    private void FocusInput(LayoutBox box, int caretIndex)
+    {
+        if (!ReferenceEquals(_focusedInput, box))
+        {
+            if (_focusedInput is not null)
+            {
+                _focusedInput.IsFocused = false;
+                _focusedInput.CompositionText = string.Empty;
+            }
+
+            _focusedInput = box;
+            box.IsFocused = true;
+        }
+
+        box.CaretIndex = Math.Clamp(caretIndex, 0, (box.InputText ?? string.Empty).Length);
+        StartCaretBlink();
+    }
+
+    /// <summary>입력 상자 포커스를 해제하고 캐럿을 숨긴다.</summary>
+    private void ClearInputFocus()
+    {
+        if (_focusedInput is null)
+        {
+            return;
+        }
+
+        _focusedInput.IsFocused = false;
+        _focusedInput.CompositionText = string.Empty;
+        _focusedInput.IsCaretVisible = false;
+        _focusedInput = null;
+        _caretTimer?.Stop();
+        Invalidate();
+    }
+
+    /// <summary>캐럿을 보이게 하고 깜빡임 타이머를 다시 시작한다.</summary>
+    private void StartCaretBlink()
+    {
+        if (_focusedInput is null)
+        {
+            return;
+        }
+
+        _focusedInput.IsCaretVisible = true;
+        _caretTimer?.Stop();
+        _caretTimer?.Start();
+        Invalidate();
+    }
+
+    private void ToggleCaret()
+    {
+        if (_focusedInput is null)
+        {
+            _caretTimer?.Stop();
+            return;
+        }
+
+        _focusedInput.IsCaretVisible = !_focusedInput.IsCaretVisible;
+        if (IsHandleCreated && !IsDisposed)
+        {
+            Invalidate();
         }
     }
 
@@ -429,12 +686,29 @@ public sealed class BrowserViewControl : UserControl
 
         if (_direct2D is { IsInitialized: true } && _paintEngine is not null)
         {
-            Render();
+            try
+            {
+                Render();
+                return;
+            }
+            catch (Exception ex)
+            {
+                // 방어 코드: 렌더링 중 예외가 나도 앱이 죽지 않도록 그래픽 자원을 정리하고
+                // 폴백 화면으로 대체한다.
+                Diagnostics.CrashLogger.Log(ex, "render");
+                _renderError = ex;
+                try
+                {
+                    DisposeGraphics();
+                }
+                catch (Exception cleanupError)
+                {
+                    Diagnostics.CrashLogger.Log(cleanupError, "render-cleanup");
+                }
+            }
         }
-        else
-        {
-            RenderFallback(e.Graphics);
-        }
+
+        RenderFallback(e.Graphics);
     }
 
     private void InitializeGraphics()
@@ -488,14 +762,22 @@ public sealed class BrowserViewControl : UserControl
         graphics.Clear(Color.White);
         using var brush = new SolidBrush(Color.DimGray);
         using var font = new Font("Malgun Gothic", 10f);
-        var message = _initializationError is null
+        var error = _renderError ?? _initializationError;
+        var message = error is null
             ? "페이지를 불러오는 중입니다..."
-            : "Direct2D 초기화 실패: " + _initializationError.Message;
+            : "렌더링 실패: " + error.Message;
         graphics.DrawString(message, font, brush, new PointF(12f, 12f));
     }
 
     private void OnLayoutUpdated(object? sender, EventArgs e)
     {
+        // 이전 렌더링 실패로 그래픽 자원이 정리된 상태라면 다시 초기화를 시도한다.
+        if (_direct2D is null && IsHandleCreated && !IsDisposed)
+        {
+            _renderError = null;
+            InitializeGraphics();
+        }
+
         ClampScroll();
         InvalidateFromAnyThread();
         RaiseScrollMetricsChanged();
@@ -570,6 +852,9 @@ public sealed class BrowserViewControl : UserControl
     {
         if (disposing)
         {
+            _caretTimer?.Stop();
+            _caretTimer?.Dispose();
+            _caretTimer = null;
             DisposeGraphics();
             _contextMenu.Dispose();
             _engine.Dispose();

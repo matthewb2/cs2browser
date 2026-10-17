@@ -31,13 +31,18 @@ internal sealed class InputLayoutHandler : ILayoutHandler
         var edges = LayoutTreeBuilder.ReadEdges(style);
         var textStyle = LayoutTreeBuilder.ReadTextStyle(style);
 
-        var leftInner = left + edges.MarginLeft + edges.BorderLeft + edges.PaddingLeft;
-        var topInner = top + edges.MarginTop + edges.BorderTop + edges.PaddingTop;
+        // 브라우저 UA 스타일과 유사하게, CSS 가 전혀 없어도 입력 상자가 보이도록
+        // 기본 테두리/안쪽 여백을 준다.
+        var (borderTop, borderRight, borderBottom, borderLeft) = EnsureBorder(edges);
+        var (padTop, padRight, padBottom, padLeft) = EnsurePadding(edges);
+
+        var leftInner = left + edges.MarginLeft + borderLeft + padLeft;
+        var topInner = top + edges.MarginTop + borderTop + padTop;
 
         var innerWidth = availableWidth
             - edges.MarginLeft - edges.MarginRight
-            - edges.BorderLeft - edges.BorderRight
-            - edges.PaddingLeft - edges.PaddingRight;
+            - borderLeft - borderRight
+            - padLeft - padRight;
         if (innerWidth < 10f)
         {
             innerWidth = 10f;
@@ -76,7 +81,7 @@ internal sealed class InputLayoutHandler : ILayoutHandler
             var rowsAttr = ParseInt(element.GetAttribute("rows"));
             var rows = rowsAttr > 0 ? rowsAttr : 2;
             var effectiveLine = cssHeight > 0f ? fontSize * TextareaLineHeightFactor : lineHeight;
-            height = cssHeight > 0f ? cssHeight : rows * effectiveLine + edges.PaddingTop + edges.PaddingBottom;
+            height = cssHeight > 0f ? cssHeight : rows * effectiveLine + padTop + padBottom;
             if (height < DefaultTextareaMinHeight)
             {
                 height = DefaultTextareaMinHeight;
@@ -105,19 +110,20 @@ internal sealed class InputLayoutHandler : ILayoutHandler
         {
             TagName = element.LocalName.ToLowerInvariant(),
             BackgroundColor = GetBackground(style),
+            BorderColor = GetBorderColor(style),
             Link = link,
             MarginTop = edges.MarginTop,
             MarginRight = edges.MarginRight,
             MarginBottom = edges.MarginBottom,
             MarginLeft = edges.MarginLeft,
-            BorderTop = edges.BorderTop,
-            BorderRight = edges.BorderRight,
-            BorderBottom = edges.BorderBottom,
-            BorderLeft = edges.BorderLeft,
-            PaddingTop = edges.PaddingTop,
-            PaddingRight = edges.PaddingRight,
-            PaddingBottom = edges.PaddingBottom,
-            PaddingLeft = edges.PaddingLeft,
+            BorderTop = borderTop,
+            BorderRight = borderRight,
+            BorderBottom = borderBottom,
+            BorderLeft = borderLeft,
+            PaddingTop = padTop,
+            PaddingRight = padRight,
+            PaddingBottom = padBottom,
+            PaddingLeft = padLeft,
             X = leftInner,
             Y = topInner,
             Width = width,
@@ -134,8 +140,22 @@ internal sealed class InputLayoutHandler : ILayoutHandler
 
         parent.Children.Add(box);
 
-        return top + edges.MarginTop + height + edges.BorderBottom + edges.MarginBottom;
+        return top + edges.MarginTop + borderTop + height + borderBottom + edges.MarginBottom;
     }
+
+    /// <summary>명시된 테두리가 전혀 없으면 입력 상자가 보이도록 기본 1px 테두리를 준다.</summary>
+    private static (float Top, float Right, float Bottom, float Left) EnsureBorder(LayoutTreeBuilder.BoxEdges edges)
+        => edges.BorderTop > 0f || edges.BorderRight > 0f || edges.BorderBottom > 0f || edges.BorderLeft > 0f
+            ? (edges.BorderTop, edges.BorderRight, edges.BorderBottom, edges.BorderLeft)
+            : (1f, 1f, 1f, 1f);
+
+    /// <summary>안쪽 여백이 0 인 변에는 브라우저와 유사한 기본 패딩을 준다.</summary>
+    private static (float Top, float Right, float Bottom, float Left) EnsurePadding(LayoutTreeBuilder.BoxEdges edges)
+        => (
+            edges.PaddingTop > 0f ? edges.PaddingTop : 1f,
+            edges.PaddingRight > 0f ? edges.PaddingRight : 2f,
+            edges.PaddingBottom > 0f ? edges.PaddingBottom : 1f,
+            edges.PaddingLeft > 0f ? edges.PaddingLeft : 2f);
 
     private static bool IsTextarea(IElement element)
         => string.Equals(element.LocalName, "textarea", StringComparison.OrdinalIgnoreCase);
@@ -165,6 +185,17 @@ internal sealed class InputLayoutHandler : ILayoutHandler
             return color;
         }
         return new Color4(1f, 1f, 1f, 1f);
+    }
+
+    private static Color4 GetBorderColor(ICssStyleDeclaration? style)
+    {
+        // 테두리 색 미지정 시 currentColor(= 글자색) 또는 기본 회색을 사용한다.
+        if (CssColor.TryParse(style?.GetPropertyValue("border-top-color"), out var color) && color.A > 0f)
+        {
+            return color;
+        }
+
+        return new Color4(0.47f, 0.47f, 0.47f, 1f);
     }
 
     private static int ParseInt(string? value)

@@ -59,11 +59,23 @@ public sealed class LayoutBox
     public float PaddingBoxWidth => Width + PaddingLeft + PaddingRight;
     public float PaddingBoxHeight => Height + PaddingTop + PaddingBottom;
 
+    /// <summary>테두리를 포함한 경계 박스(내용 + 패딩 + 테두리).</summary>
+    public float BorderBoxLeft => X - PaddingLeft - BorderLeft;
+    public float BorderBoxTop => Y - PaddingTop - BorderTop;
+    public float BorderBoxWidth => Width + PaddingLeft + PaddingRight + BorderLeft + BorderRight;
+    public float BorderBoxHeight => Height + PaddingTop + PaddingBottom + BorderTop + BorderBottom;
+
+    /// <summary>테두리 색(없으면 렌더러가 기본값 사용).</summary>
+    public Color4? BorderColor { get; set; }
+
     /// <summary>텍스트 입력 상자(&lt;input&gt; / &lt;textarea&gt;) 여부.</summary>
     public bool IsTextInput { get; set; }
 
     /// <summary>&lt;input&gt;/&lt;textarea&gt;에 입력된 현재 텍스트.</summary>
     public string? InputText { get; set; }
+
+    /// <summary>IME 로 조합 중인 텍스트(렌더링/캐럿 위치용). 비어 있으면 조합 중이 아님.</summary>
+    public string CompositionText { get; set; } = string.Empty;
 
     /// <summary>현재 커서 위치(문자 인덱스).</summary>
     public int CaretIndex { get; set; }

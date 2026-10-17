@@ -242,6 +242,66 @@ public sealed class BrowserViewControlTests
         });
     }
 
+    [TestMethod]
+    public void BrowserViewControl_ClickInput_FocusesAndTypingInserts()
+    {
+        StaRunner.Run(() =>
+        {
+            using var form = new Form { ClientSize = new System.Drawing.Size(400, 200) };
+            var view = new BrowserViewControl { Dock = DockStyle.Fill };
+            form.Controls.Add(view);
+            _ = form.Handle;
+            _ = view.Handle;
+
+            view.LoadHtmlAsync("<html><body style='margin:0'><input type='text' value='hi'></body></html>")
+                .GetAwaiter().GetResult();
+
+            Assert.IsTrue(view.TryGetInputAt(new Point(10, 10), out var input));
+            Assert.IsNotNull(input);
+
+            // 입력 상자 클릭 → 포커스 + 캐럿 표시.
+            RaiseMouseDown(view, new Point(10, 10));
+            Assert.IsTrue(input!.IsFocused, "클릭한 입력 상자가 포커스되어야 합니다.");
+            Assert.IsTrue(input.IsCaretVisible, "포커스 시 캐럿이 보여야 합니다.");
+
+            // 끝으로 이동 후 타이핑하면 값이 갱신된다.
+            RaiseKeyDown(view, Keys.End);
+            RaiseKeyPress(view, 'X');
+            Assert.AreEqual("hiX", input.InputText);
+            Assert.AreEqual(3, input.CaretIndex);
+
+            // 백스페이스로 한 글자 삭제.
+            RaiseKeyDown(view, Keys.Back);
+            Assert.AreEqual("hi", input.InputText);
+        });
+    }
+
+    [TestMethod]
+    public void BrowserViewControl_ClickInput_BlursOnOutsideClick()
+    {
+        StaRunner.Run(() =>
+        {
+            using var form = new Form { ClientSize = new System.Drawing.Size(400, 200) };
+            var view = new BrowserViewControl { Dock = DockStyle.Fill };
+            form.Controls.Add(view);
+            _ = form.Handle;
+            _ = view.Handle;
+
+            view.LoadHtmlAsync(
+                "<html><body style='margin:0'><input type='text' value='hi'><p style='margin:0'>text</p></body></html>")
+                .GetAwaiter().GetResult();
+
+            RaiseMouseDown(view, new Point(10, 10));
+            Assert.IsTrue(view.TryGetInputAt(new Point(10, 10), out var input));
+            Assert.IsTrue(input!.IsFocused);
+
+            // 입력 상자 바깥(아래 문단)을 클릭하면 포커스가 해제된다.
+            RaiseMouseDown(view, new Point(5, (int)(input.BorderBoxTop + input.BorderBoxHeight + 20f)));
+            Assert.IsFalse(input.IsFocused, "바깥 클릭 시 포커스가 해제되어야 합니다.");
+            Assert.IsFalse(input.IsCaretVisible);
+        });
+    }
+
     private static void RaiseMouseDown(BrowserViewControl view, Point point)
         => InvokeProtected(view, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
 
@@ -251,11 +311,17 @@ public sealed class BrowserViewControlTests
     private static void RaiseMouseUp(BrowserViewControl view, Point point)
         => InvokeProtected(view, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
 
-    private static void InvokeProtected(BrowserViewControl view, string method, MouseEventArgs args)
+    private static void RaiseKeyDown(BrowserViewControl view, Keys key)
+        => InvokeProtected(view, "OnKeyDown", new KeyEventArgs(key));
+
+    private static void RaiseKeyPress(BrowserViewControl view, char ch)
+        => InvokeProtected(view, "OnKeyPress", new KeyPressEventArgs(ch));
+
+    private static void InvokeProtected(BrowserViewControl view, string method, object arg)
     {
         var info = typeof(BrowserViewControl).GetMethod(
             method,
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        info!.Invoke(view, new object[] { args });
+        info!.Invoke(view, new[] { arg });
     }
 }

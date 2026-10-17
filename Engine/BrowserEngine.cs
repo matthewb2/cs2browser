@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using CS2Browser.Layout;
@@ -25,7 +26,7 @@ public sealed class BrowserEngine : IDisposable
 
     public BrowserEngine()
     {
-        ResourceLoader = new ResourceLoader();
+        ResourceLoader = new ResourceLoader(HttpCacheManager.CreateDefault());
         DomManager = new DomManager(ResourceLoader);
         ScriptEngine = new ScriptEngine();
         ScriptEngine.Attach(DomManager);
@@ -119,9 +120,16 @@ public sealed class BrowserEngine : IDisposable
             foreach (Match metaTag in MetaRefreshTagRegex.Matches(text))
             {
                 var content = ContentAttributeRegex.Match(metaTag.Value);
+
+                // noscript 원시 텍스트는 엔티티가 디코딩되지 않은 채 유지되므로
+                // URL 앞뒤의 &quot; 등 엔티티를 풀어준다.
+                var rawContent = content.Success
+                    ? WebUtility.HtmlDecode(content.Groups["value"].Value)
+                    : null;
+
                 var target = ResolveRefreshTarget(
                     "refresh",
-                    content.Success ? content.Groups["value"].Value : null,
+                    rawContent,
                     document,
                     baseAddress);
                 if (target is not null)
