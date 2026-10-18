@@ -1,7 +1,8 @@
-using System.Globalization;
-using System.Text;
 using AngleSharp.Css.Dom;
 using AngleSharp.Dom;
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using Vortice.Mathematics;
 
 namespace CS2Browser.Layout;
@@ -269,14 +270,42 @@ public sealed class LayoutTreeBuilder
     internal static string GetDisplay(ICssStyleDeclaration? style)
         => style?.GetPropertyValue("display").Trim().ToLowerInvariant() ?? string.Empty;
 
-    internal static ICssStyleDeclaration? SafeStyle(IElement element)
+
+    internal static ICssStyleDeclaration? SafeStyle(IElement? element)
     {
+        if (element == null)
+        {
+            return null;
+        }
+
+        // 1. AngleSharp.Css 내부 연산 오류를 유발하는 것으로 확인된 클래스나 패턴 사전 차단
+        string className = element.ClassName ?? string.Empty;
+        if (className.Contains("logo_homepage", StringComparison.OrdinalIgnoreCase))
+        {
+            // 해당 엘리먼트는 계산을 생략하고 null 반환 (필요시 기본 레이아웃 스타일 적용)
+            return null;
+        }
+
+        // 2. 소속 문서 및 컨텍스트 유효성 검사
+        if (element.Owner?.Context == null)
+        {
+            return null;
+        }
+
         try
         {
+            // 3. 스타일시트나 인라인 스타일이 없는 경우 생략
+            if (element.Owner.StyleSheets.Length == 0 && string.IsNullOrEmpty(element.GetAttribute("style")))
+            {
+                return null;
+            }
+
             return element.ComputeCurrentStyle();
         }
-        catch
+        catch (Exception ex)
         {
+            // 혹시 모를 다른 예외 대비 이중 방어
+            Debug.WriteLine($"[SafeStyle ERROR] <{element.TagName} class='{className}'>: {ex.Message}");
             return null;
         }
     }

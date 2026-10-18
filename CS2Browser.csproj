@@ -12,14 +12,19 @@
     <PackageReference Include="AngleSharp" Version="1.8.4" />
     <PackageReference Include="AngleSharp.Css" Version="1.1.2" />
     <PackageReference Include="AngleSharp.Js" Version="1.1.1" />
+    <PackageReference Include="Microsoft.ClearScript.V8" Version="7.5.1.1" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.win-x64" Version="7.5.1.1" />
     <PackageReference Include="Vortice.Direct2D1" Version="3.8.3" />
   </ItemGroup>
 
-  <!-- 테스트 프로젝트는 이 프로젝트의 컴파일에 포함하지 않는다. -->
+  <!-- 테스트/도구 프로젝트는 이 프로젝트의 컴파일에 포함하지 않는다. -->
   <ItemGroup>
     <Compile Remove="Tests\**" />
     <None Remove="Tests\**" />
     <EmbeddedResource Remove="Tests\**" />
+    <Compile Remove="Tools\**" />
+    <None Remove="Tools\**" />
+    <EmbeddedResource Remove="Tools\**" />
   </ItemGroup>
 
   <ItemGroup>

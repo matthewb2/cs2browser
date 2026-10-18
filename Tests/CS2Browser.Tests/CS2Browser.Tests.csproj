@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\CS2Browser.csproj" />
+    <ProjectReference Include="..\..\Tools\CS2Browser.IdlGenerator\CS2Browser.IdlGenerator.csproj" />
   </ItemGroup>
 
   <ItemGroup>

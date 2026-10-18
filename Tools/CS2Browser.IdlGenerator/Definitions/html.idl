@@ -1,0 +1,28 @@
+// Web IDL 부분집합: HTML 문서/엘리먼트 바인딩 생성기 입력용.
+
+[Exposed=Window]
+interface Document : Node {
+  readonly attribute Element documentElement;
+  readonly attribute Element? body;
+  readonly attribute Element? head;
+  attribute DOMString title;
+  Element? getElementById(DOMString elementId);
+  Element createElement(DOMString localName);
+  Node createTextNode(DOMString data);
+  Element? querySelector(DOMString selectors);
+  NodeList querySelectorAll(DOMString selectors);
+  NodeList getElementsByTagName(DOMString localName);
+  NodeList getElementsByClassName(DOMString classNames);
+  readonly attribute DOMString readyState;
+  attribute DOMString? cookie;
+};
+
+[Exposed=Window]
+interface HTMLElement : Element {
+  attribute DOMString? title;
+  attribute DOMString lang;
+  attribute DOMString? innerText;
+  void click();
+  void focus();
+  void blur();
+};

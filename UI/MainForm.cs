@@ -98,7 +98,7 @@ public partial class MainForm : Form
         Cursor = Cursors.WaitCursor;
         try
         {
-            var startPagePath = Path.Combine(AppContext.BaseDirectory, "Res", "index.html");
+            var startPagePath = Path.Combine(AppContext.BaseDirectory, "Res", "input-test.html");
             if (File.Exists(startPagePath))
             {
                 await NavigateAsync(new Uri(startPagePath).AbsoluteUri, recordHistory: false);
