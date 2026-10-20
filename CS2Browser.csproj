@@ -36,4 +36,20 @@
     <None Update="Res\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="Scripting\\Generated\\CharacterData.g.cs" />
+    <Compile Include="Scripting\\Generated\\Comment.g.cs" />
+    <Compile Include="Scripting\\Generated\\CSSStyleDeclaration.g.cs" />
+    <Compile Include="Scripting\\Generated\\Document.g.cs" />
+    <Compile Include="Scripting\\Generated\\DOMTokenList.g.cs" />
+    <Compile Include="Scripting\\Generated\\Element.g.cs" />
+    <Compile Include="Scripting\\Generated\\Event.g.cs" />
+    <Compile Include="Scripting\\Generated\\EventTarget.g.cs" />
+    <Compile Include="Scripting\\Generated\\HTMLElement.g.cs" />
+    <Compile Include="Scripting\\Generated\\HTMLInputElement.g.cs" />
+    <Compile Include="Scripting\\Generated\\HTMLTextAreaElement.g.cs" />
+    <Compile Include="Scripting\\Generated\\Node.g.cs" />
+    <Compile Include="Scripting\\Generated\\NodeList.g.cs" />
+    <Compile Include="Scripting\\Generated\\Text.g.cs" />
+  </ItemGroup>
 </Project>

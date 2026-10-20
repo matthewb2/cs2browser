@@ -19,12 +19,16 @@ internal class EventTargetBridge : DomBridgeBase
     }
 
     [ScriptMember("addEventListener")]
-    public object? AddEventListener(object? type = null, object? listener = null)
-        => Call("addEventListener", type, listener);
+    public void AddEventListener(string type, object? listener)
+    {
+        DomEventRegistry.AddListener(DomTarget, type, listener, DomEngine);
+    }
 
     [ScriptMember("removeEventListener")]
-    public object? RemoveEventListener(object? type = null, object? listener = null)
-        => Call("removeEventListener", type, listener);
+    public void RemoveEventListener(string type, object? listener)
+    {
+        DomEventRegistry.RemoveListener(DomTarget, type, listener);
+    }
 
     [ScriptMember("dispatchEvent")]
     public object? DispatchEvent(object? @event = null)

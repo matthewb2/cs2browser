@@ -39,6 +39,13 @@ internal class HTMLElementBridge : ElementBridge
         set => Set("innerText", value);
     }
 
+    [ScriptMember("value")]
+    public object? Value
+    {
+        get => Get("value");
+        set => Set("value", value);
+    }
+
     [ScriptMember("click")]
     public object? Click()
         => Call("click");

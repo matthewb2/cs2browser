@@ -64,6 +64,12 @@ internal class ElementBridge : NodeBridge
         set => ((AngleSharp.Dom.IElement)DomTarget).OuterHtml = value!;
     }
 
+    [ScriptMember("style")]
+    public object? Style
+    {
+        get => V8DomFactory.WrapInlineStyle((AngleSharp.Dom.IElement)DomTarget, DomEngine);
+    }
+
     [ScriptMember("getAttribute")]
     public string? GetAttribute(string qualifiedName) => ((AngleSharp.Dom.IElement)DomTarget).GetAttribute(qualifiedName);
 

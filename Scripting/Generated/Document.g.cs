@@ -65,6 +65,9 @@ internal class DocumentBridge : NodeBridge
     [ScriptMember("createTextNode")]
     public object? CreateTextNode(string data) => Wrap(((AngleSharp.Dom.IDocument)DomTarget).CreateTextNode(data));
 
+    [ScriptMember("createComment")]
+    public object? CreateComment(string data) => Wrap(((AngleSharp.Dom.IDocument)DomTarget).CreateComment(data));
+
     [ScriptMember("querySelector")]
     public object? QuerySelector(string selectors) => Wrap(((AngleSharp.Dom.IDocument)DomTarget).QuerySelector(selectors));
 

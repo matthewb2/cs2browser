@@ -21,9 +21,11 @@ interface Node : EventTarget {
   readonly attribute Node? lastChild;
   readonly attribute Node? nextSibling;
   readonly attribute Node? previousSibling;
+  readonly attribute boolean isConnected;
   readonly attribute NodeList childNodes;
   Node appendChild(Node node);
   Node removeChild(Node child);
+  Node insertBefore(Node newChild, Node? refChild);
   Node cloneNode(optional boolean deep = false);
   boolean contains(Node? other);
   boolean hasChildNodes();
@@ -48,6 +50,7 @@ interface Element : Node {
   NodeList getElementsByClassName(DOMString classNames);
   void append(Node node);
   void remove();
+  readonly attribute CSSStyleDeclaration style;
 };
 
 [Exposed=Window]
@@ -72,4 +75,33 @@ interface Event {
   readonly attribute EventTarget? target;
   void preventDefault();
   void stopPropagation();
+};
+
+// React 가 text/comment 노드를 만들고 조작할 때 필요한 최소 부분집합.
+[Exposed=Window]
+interface CharacterData : Node {
+  attribute DOMString data;
+  readonly attribute unsigned long length;
+  void appendData(DOMString data);
+  DOMString substringData(unsigned long offset, unsigned long count);
+};
+
+[Exposed=Window]
+interface Text : CharacterData {
+  readonly attribute DOMString wholeText;
+};
+
+[Exposed=Window]
+interface Comment : CharacterData {
+};
+
+// element.style / getComputedStyle 가 반환하는 CSS 스타일 선언 브릿지.
+[Exposed=Window]
+interface CSSStyleDeclaration {
+  attribute DOMString cssText;
+  readonly attribute unsigned long length;
+  DOMString getPropertyValue(DOMString property);
+  void setProperty(DOMString property, DOMString value, optional DOMString priority);
+  DOMString removeProperty(DOMString property);
+  DOMString item(unsigned long index);
 };

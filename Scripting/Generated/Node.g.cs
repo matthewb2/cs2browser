@@ -78,6 +78,12 @@ internal class NodeBridge : EventTargetBridge
         get => Wrap(((AngleSharp.Dom.INode)DomTarget).PreviousSibling);
     }
 
+    [ScriptMember("isConnected")]
+    public object? IsConnected
+    {
+        get => Get("isConnected");
+    }
+
     [ScriptMember("childNodes")]
     public object? ChildNodes
     {
@@ -89,6 +95,9 @@ internal class NodeBridge : EventTargetBridge
 
     [ScriptMember("removeChild")]
     public object? RemoveChild(object? child) => Wrap(((AngleSharp.Dom.INode)DomTarget).RemoveChild((AngleSharp.Dom.INode)V8DomFactory.Unwrap(child)!));
+
+    [ScriptMember("insertBefore")]
+    public object? InsertBefore(object? newChild, object? refChild) => Wrap(((AngleSharp.Dom.INode)DomTarget).InsertBefore((AngleSharp.Dom.INode)V8DomFactory.Unwrap(newChild)!, (AngleSharp.Dom.INode)V8DomFactory.Unwrap(refChild)!));
 
     [ScriptMember("cloneNode")]
     public object? CloneNode(object? deep = null)

@@ -26,6 +26,11 @@ public static class StaticBindingMap
 {
     private static readonly Dictionary<string, StaticBinding> Bindings = new(StringComparer.Ordinal)
     {
+        // ---------------------------------------------------------- EventTarget
+        // 리스너는 V8 ScriptObject 이므로 AngleSharp 이벤트 시스템과 연결하려면 레지스트리가 필요하다.
+        ["EventTarget.addEventListener"] = new(StaticKind.Method, "void", "DomEventRegistry.AddListener(DomTarget, type, listener, DomEngine);", null, new[] { "type", "listener" }),
+        ["EventTarget.removeEventListener"] = new(StaticKind.Method, "void", "DomEventRegistry.RemoveListener(DomTarget, type, listener);", null, new[] { "type", "listener" }),
+
         // ---------------------------------------------------------------- Node
         ["Node.nodeType"] = new(StaticKind.Property, "ushort", "(ushort)((AngleSharp.Dom.INode)DomTarget).NodeType"),
         ["Node.nodeName"] = new(StaticKind.Property, "string", "((AngleSharp.Dom.INode)DomTarget).NodeName"),
@@ -39,7 +44,12 @@ public static class StaticBindingMap
         ["Node.childNodes"] = new(StaticKind.Property, "object?", "Wrap(((AngleSharp.Dom.INode)DomTarget).ChildNodes)"),
         ["Node.appendChild"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.INode)DomTarget).AppendChild((AngleSharp.Dom.INode)V8DomFactory.Unwrap(node)!))", null, new[] { "node" }),
         ["Node.removeChild"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.INode)DomTarget).RemoveChild((AngleSharp.Dom.INode)V8DomFactory.Unwrap(child)!))", null, new[] { "child" }),
+        ["Node.insertBefore"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.INode)DomTarget).InsertBefore((AngleSharp.Dom.INode)V8DomFactory.Unwrap(newChild)!, (AngleSharp.Dom.INode)V8DomFactory.Unwrap(refChild)!))", null, new[] { "newChild", "refChild" }),
         ["Node.contains"] = new(StaticKind.Method, "bool", "((AngleSharp.Dom.INode)DomTarget).Contains((AngleSharp.Dom.INode)V8DomFactory.Unwrap(other)!)", null, new[] { "other" }),
+
+        // -------------------------------------------------------- CharacterData
+        ["CharacterData.data"] = new(StaticKind.Property, "string", "((AngleSharp.Dom.ICharacterData)DomTarget).Data", "((AngleSharp.Dom.ICharacterData)DomTarget).Data = value!;"),
+        ["CharacterData.length"] = new(StaticKind.Property, "uint", "(uint)((AngleSharp.Dom.ICharacterData)DomTarget).Length"),
 
         // ---------------------------------------------------------------- Element
         ["Element.tagName"] = new(StaticKind.Property, "string", "((AngleSharp.Dom.IElement)DomTarget).TagName"),
@@ -48,6 +58,8 @@ public static class StaticBindingMap
         ["Element.className"] = new(StaticKind.Property, "string", "((AngleSharp.Dom.IElement)DomTarget).ClassName!", "((AngleSharp.Dom.IElement)DomTarget).ClassName = value;"),
         ["Element.innerHTML"] = new(StaticKind.Property, "string?", "((AngleSharp.Dom.IElement)DomTarget).InnerHtml", "((AngleSharp.Dom.IElement)DomTarget).InnerHtml = value!;"),
         ["Element.outerHTML"] = new(StaticKind.Property, "string?", "((AngleSharp.Dom.IElement)DomTarget).OuterHtml", "((AngleSharp.Dom.IElement)DomTarget).OuterHtml = value!;"),
+        // element.style 은 AngleSharp.Css 의 인라인 스타일 선언을 감싼 CSSStyleDeclarationBridge 로 노출한다.
+        ["Element.style"] = new(StaticKind.Property, "object?", "V8DomFactory.WrapInlineStyle((AngleSharp.Dom.IElement)DomTarget, DomEngine)"),
         ["Element.children"] = new(StaticKind.Property, "object?", "Wrap(((AngleSharp.Dom.IElement)DomTarget).Children)"),
         ["Element.getAttribute"] = new(StaticKind.Method, "string?", "((AngleSharp.Dom.IElement)DomTarget).GetAttribute(qualifiedName)", null, new[] { "qualifiedName" }),
         ["Element.setAttribute"] = new(StaticKind.Method, "void", "((AngleSharp.Dom.IElement)DomTarget).SetAttribute(qualifiedName, value);", null, new[] { "qualifiedName", "value" }),
@@ -63,6 +75,7 @@ public static class StaticBindingMap
         ["Document.getElementById"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).GetElementById(elementId))", null, new[] { "elementId" }),
         ["Document.createElement"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).CreateElement(localName))", null, new[] { "localName" }),
         ["Document.createTextNode"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).CreateTextNode(data))", null, new[] { "data" }),
+        ["Document.createComment"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).CreateComment(data))", null, new[] { "data" }),
         ["Document.querySelector"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).QuerySelector(selectors))", null, new[] { "selectors" }),
         ["Document.querySelectorAll"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).QuerySelectorAll(selectors))", null, new[] { "selectors" })
     };
