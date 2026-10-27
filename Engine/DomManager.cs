@@ -36,6 +36,7 @@ public sealed class DomManager
             .WithRenderDevice(_renderDevice)
             .WithCss()
             .With(new V8ScriptingService())
+            .WithScripting()
             .WithEventLoop();
 
         Context = BrowsingContext.New(configuration);
