@@ -8,7 +8,7 @@ namespace CS2Browser.Engine;
 
 /// <summary>
 /// AngleSharp BrowsingContext 와 문서 초기화를 관리한다.
-/// WithDefaultLoader / WithCss / WithJs 설정을 담당한다.
+/// WithDefaultLoader / WithCss / V8ScriptingService 설정을 담당한다.
 /// </summary>
 public sealed class DomManager
 {
@@ -35,7 +35,7 @@ public sealed class DomManager
             .With(new FileRequester())
             .WithRenderDevice(_renderDevice)
             .WithCss()
-            .WithJs()
+            .With(new V8ScriptingService())
             .WithEventLoop();
 
         Context = BrowsingContext.New(configuration);
