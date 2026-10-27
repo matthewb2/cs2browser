@@ -17,12 +17,13 @@ public sealed class V8DomContext : IDisposable
         var documentBridge = V8DomFactory.Wrap(document, _engine)!;
         var window = new WindowBridge(documentBridge, document, _engine);
 
-        _engine.AddHostObject("window", window);
+        _engine.AddHostObject("__cs2HostWindow", window);
         _engine.AddHostObject("document", documentBridge);
         _engine.AddHostObject("console", window.console);
         _engine.AddHostObject("navigator", window.navigator);
 
         _engine.Execute("globalThis.self = globalThis;");
+        InstallWindowProxy();
         InstallGlobalAliases();
         InstallConstructorStubs();
     }
@@ -38,9 +39,9 @@ public sealed class V8DomContext : IDisposable
   names.forEach(function (name) {
     var w = global.window;
     if (!w) return;
-    var fn = w[name];
-    if (typeof fn !== 'function') return;
-    global[name] = function () { return fn.apply(w, arguments); };
+    if (!w[name]) return;
+    // 호스트 메서드에는 Function.prototype.apply 가 없으므로 직접 호출한다.
+    global[name] = function () { return w[name](...arguments); };
   });
 })(globalThis);
 ");
@@ -62,6 +63,24 @@ public sealed class V8DomContext : IDisposable
   global.Comment = illegal('Comment');
   global.DocumentFragment = illegal('DocumentFragment');
   global.Event = illegal('Event');
+})(globalThis);
+");
+    }
+
+    /// <summary>
+    /// <c>window.X</c> 가 호스트 멤버에 없으면 전역(globalThis)으로 대체되도록 window 를 Proxy 로 감싼다.
+    /// </summary>
+    private void InstallWindowProxy()
+    {
+        _engine.Execute(@"
+(function (global) {
+  var host = global.__cs2HostWindow;
+  delete global.__cs2HostWindow;
+  global.window = new Proxy(host, {
+    get: function (t, p) { var v = t[p]; return v === undefined ? global[p] : v; },
+    set: function (t, p, v) { global[p] = v; return true; },
+    has: function (t, p) { return p in t || p in global; }
+  });
 })(globalThis);
 ");
     }

@@ -11,7 +11,7 @@ using Microsoft.ClearScript.V8;
 namespace CS2Browser.Scripting.Generated;
 
 [NoDefaultScriptAccess]
-internal class DOMTokenListBridge : DomBridgeBase
+public class DOMTokenListBridge : DomBridgeBase
 {
     public DOMTokenListBridge(object target, V8ScriptEngine engine)
         : base(target, engine)

@@ -7,6 +7,20 @@ namespace CS2Browser.Tests;
 public sealed class ScriptEngineTests
 {
     [TestMethod]
+    public async Task Evaluate_GetElementById_IsFunction()
+    {
+        using var loader = new ResourceLoader();
+        var dom = new DomManager(loader);
+        await dom.OpenHtmlAsync("<html><body><div id='d'>old</div></body></html>");
+
+        var script = new ScriptEngine();
+        script.Attach(dom);
+        var type = script.Evaluate("typeof document.getElementById");
+
+        Assert.AreEqual("function", type);
+    }
+
+    [TestMethod]
     public async Task Evaluate_MutatesDocument()
     {
         using var loader = new ResourceLoader();

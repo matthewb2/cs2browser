@@ -11,7 +11,7 @@ using Microsoft.ClearScript.V8;
 namespace CS2Browser.Scripting.Generated;
 
 [NoDefaultScriptAccess]
-internal class CSSStyleDeclarationBridge : DomBridgeBase
+public class CSSStyleDeclarationBridge : DomBridgeBase
 {
     public CSSStyleDeclarationBridge(object target, V8ScriptEngine engine)
         : base(target, engine)
@@ -36,8 +36,10 @@ internal class CSSStyleDeclarationBridge : DomBridgeBase
         => Call("getPropertyValue", property);
 
     [ScriptMember("setProperty")]
-    public object? SetProperty(object? property = null, object? value = null, object? priority = null)
-        => Call("setProperty", property, value, priority);
+    public void SetProperty(string property, string value, string? priority = null)
+    {
+        ((AngleSharp.Css.Dom.ICssStyleDeclaration)DomTarget).SetProperty(property, value, string.IsNullOrEmpty(priority) ? null : priority);
+    }
 
     [ScriptMember("removeProperty")]
     public object? RemoveProperty(object? property = null)

@@ -11,7 +11,7 @@ using Microsoft.ClearScript.V8;
 namespace CS2Browser.Scripting.Generated;
 
 [NoDefaultScriptAccess]
-internal class EventTargetBridge : DomBridgeBase
+public class EventTargetBridge : DomBridgeBase
 {
     public EventTargetBridge(object target, V8ScriptEngine engine)
         : base(target, engine)

@@ -11,7 +11,7 @@ using Microsoft.ClearScript.V8;
 namespace CS2Browser.Scripting.Generated;
 
 [NoDefaultScriptAccess]
-internal class HTMLInputElementBridge : HTMLElementBridge
+public class HTMLInputElementBridge : HTMLElementBridge
 {
     public HTMLInputElementBridge(object target, V8ScriptEngine engine)
         : base(target, engine)

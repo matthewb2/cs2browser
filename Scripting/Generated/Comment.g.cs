@@ -11,7 +11,7 @@ using Microsoft.ClearScript.V8;
 namespace CS2Browser.Scripting.Generated;
 
 [NoDefaultScriptAccess]
-internal class CommentBridge : CharacterDataBridge
+public class CommentBridge : CharacterDataBridge
 {
     public CommentBridge(object target, V8ScriptEngine engine)
         : base(target, engine)

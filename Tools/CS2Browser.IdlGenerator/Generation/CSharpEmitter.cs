@@ -57,7 +57,7 @@ public sealed class CSharpEmitter
         sb.AppendLine($"namespace {_namespace};");
         sb.AppendLine();
         sb.AppendLine("[NoDefaultScriptAccess]");
-        sb.AppendLine($"internal class {className} : {baseClass}");
+        sb.AppendLine($"public class {className} : {baseClass}");
         sb.AppendLine("{");
         sb.AppendLine($"    public {className}(object target, V8ScriptEngine engine)");
         sb.AppendLine("        : base(target, engine)");
@@ -149,7 +149,7 @@ public sealed class CSharpEmitter
             && parameters.Length == operation.Arguments.Count)
         {
             var typedParams = string.Join(", ", operation.Arguments.Select((arg, i) =>
-                $"{ParamType(arg.Type)} {NameMapper.Escape(parameters[i])}"));
+                TypedParam(arg, parameters[i])));
             sb.AppendLine($"    [ScriptMember(\"{operation.Name}\")]");
             if (string.Equals(binding.ReturnType, "void", StringComparison.Ordinal))
             {
@@ -185,4 +185,21 @@ public sealed class CSharpEmitter
 
     private static string ParamType(IdlType type)
         => TypeMapper.IsDomNodeType(type) ? "object?" : TypeMapper.Map(type);
+
+    private static string TypedParam(IdlArgument arg, string name)
+    {
+        var type = ParamType(arg.Type);
+        var escaped = NameMapper.Escape(name);
+        if (!arg.Optional)
+        {
+            return $"{type} {escaped}";
+        }
+
+        if (TypeMapper.IsValueType(type.TrimEnd('?')))
+        {
+            return $"{type} {escaped} = default";
+        }
+
+        return $"{(type.EndsWith('?') ? type : type + "?")} {escaped} = null";
+    }
 }

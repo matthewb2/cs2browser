@@ -11,7 +11,7 @@ using Microsoft.ClearScript.V8;
 namespace CS2Browser.Scripting.Generated;
 
 [NoDefaultScriptAccess]
-internal class ElementBridge : NodeBridge
+public class ElementBridge : NodeBridge
 {
     public ElementBridge(object target, V8ScriptEngine engine)
         : base(target, engine)

@@ -189,7 +189,7 @@ public class CSharpEmitterTests
 
         StringAssert.Contains(source, "#nullable enable");
         StringAssert.Contains(source, "[NoDefaultScriptAccess]");
-        StringAssert.Contains(source, "internal class NodeBridge");
+        StringAssert.Contains(source, "public class NodeBridge");
     }
 
     [TestMethod]

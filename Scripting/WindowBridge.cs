@@ -47,10 +47,10 @@ public sealed class WindowBridge
     public int innerHeight => 768;
 
     [ScriptMember]
-    public int setTimeout(Action callback, int delay) => Schedule(callback, delay, repeat: false);
+    public int setTimeout(object callback, int delay = 0) => Schedule(ToAction(callback), delay, repeat: false);
 
     [ScriptMember]
-    public int setInterval(Action callback, int delay) => Schedule(callback, delay, repeat: true);
+    public int setInterval(object callback, int delay = 0) => Schedule(ToAction(callback), delay, repeat: true);
 
     [ScriptMember]
     public void clearTimeout(int id) => Cancel(id);
@@ -59,12 +59,12 @@ public sealed class WindowBridge
     public void clearInterval(int id) => Cancel(id);
 
     [ScriptMember]
-    public int requestAnimationFrame(Action callback)
+    public int requestAnimationFrame(object callback)
     {
-        ArgumentNullException.ThrowIfNull(callback);
+        var action = ToAction(callback);
 
         var id = _nextFrameId++;
-        _frameCallbacks.Add((id, callback));
+        _frameCallbacks.Add((id, action));
         EnsureFrameTimer();
         return id;
     }
@@ -122,6 +122,15 @@ public sealed class WindowBridge
         _frameCallbacks.Clear();
         _frameTimer?.Stop();
     }
+
+    /// <summary>JS 함수(<see cref="ScriptObject"/>)는 자동으로 델리게이트로 변환되지 않으므로 직접 감싼다.</summary>
+    private static Action ToAction(object callback) => callback switch
+    {
+        null => throw new ArgumentNullException(nameof(callback)),
+        Action action => action,
+        ScriptObject script => () => script.Invoke(false),
+        _ => throw new ArgumentException("callback 은 함수여야 합니다.", nameof(callback))
+    };
 
     private int Schedule(Action callback, int delay, bool repeat)
     {

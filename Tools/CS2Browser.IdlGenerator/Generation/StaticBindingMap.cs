@@ -77,7 +77,11 @@ public static class StaticBindingMap
         ["Document.createTextNode"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).CreateTextNode(data))", null, new[] { "data" }),
         ["Document.createComment"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).CreateComment(data))", null, new[] { "data" }),
         ["Document.querySelector"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).QuerySelector(selectors))", null, new[] { "selectors" }),
-        ["Document.querySelectorAll"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).QuerySelectorAll(selectors))", null, new[] { "selectors" })
+        ["Document.querySelectorAll"] = new(StaticKind.Method, "object?", "Wrap(((AngleSharp.Dom.IDocument)DomTarget).QuerySelectorAll(selectors))", null, new[] { "selectors" }),
+
+        // ------------------------------------------------- CSSStyleDeclaration
+        // AngleSharp.Css 는 priority 가 "" 이면 값을 무시하므로, 브라우저처럼 일반 우선순위(null)로 취급한다.
+        ["CSSStyleDeclaration.setProperty"] = new(StaticKind.Method, "void", "((AngleSharp.Css.Dom.ICssStyleDeclaration)DomTarget).SetProperty(property, value, string.IsNullOrEmpty(priority) ? null : priority);", null, new[] { "property", "value", "priority" })
     };
 
     public static bool TryGet(string interfaceName, string memberName, out StaticBinding binding)

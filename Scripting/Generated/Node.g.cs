@@ -11,7 +11,7 @@ using Microsoft.ClearScript.V8;
 namespace CS2Browser.Scripting.Generated;
 
 [NoDefaultScriptAccess]
-internal class NodeBridge : EventTargetBridge
+public class NodeBridge : EventTargetBridge
 {
     public NodeBridge(object target, V8ScriptEngine engine)
         : base(target, engine)
