@@ -123,8 +123,14 @@ public sealed class LayoutTreeBuilder
     {
         var edges = ReadEdges(style);
 
-        contentLeft = left + edges.MarginLeft + edges.BorderLeft + edges.PaddingLeft;
-        contentTop = top + edges.MarginTop + edges.BorderTop + edges.PaddingTop;
+        // 박스의 Border-box 좌상단 위치
+        float boxX = left + edges.MarginLeft;
+        float boxY = top + edges.MarginTop;
+
+        // 실제 내부 content 영역의 좌상단 위치
+        contentLeft = boxX + edges.BorderLeft + edges.PaddingLeft;
+        contentTop = boxY + edges.BorderTop + edges.PaddingTop;
+
         innerWidth = MathF.Max(
             0f,
             availableWidth
@@ -150,8 +156,8 @@ public sealed class LayoutTreeBuilder
             PaddingBottom = edges.PaddingBottom,
             PaddingLeft = edges.PaddingLeft
         };
-        box.X = contentLeft;
-        box.Y = contentTop;
+        box.X = boxX;
+        box.Y = boxY;
         box.Width = innerWidth;
         parent.Children.Add(box);
 
