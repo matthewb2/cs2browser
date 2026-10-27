@@ -1,5 +1,6 @@
 using AngleSharp;
 using AngleSharp.Css;
+using AngleSharp.Css.Dom;
 using AngleSharp.Dom;
 using AngleSharp.Io;
 using CS2Browser.Network;
