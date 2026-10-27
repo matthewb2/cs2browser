@@ -147,7 +147,7 @@ public sealed class WindowBridge
 
             try
             {
-                callback();
+                V8DomContext.RunTask(_engine, callback);
             }
             catch (Exception ex)
             {
@@ -183,17 +183,21 @@ public sealed class WindowBridge
             var batch = _frameCallbacks.ToArray();
             _frameCallbacks.Clear();
 
-            foreach (var (_, callback) in batch)
+            // 한 프레임의 rAF 콜백을 모두 실행한 뒤 한 번만 커밋한다.
+            V8DomContext.RunTask(_engine, () =>
             {
-                try
+                foreach (var (_, callback) in batch)
                 {
-                    callback();
+                    try
+                    {
+                        callback();
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[JS:rAF] {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[JS:rAF] {ex.Message}");
-                }
-            }
+            });
 
             if (_frameCallbacks.Count == 0)
             {

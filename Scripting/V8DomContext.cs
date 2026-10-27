@@ -1,11 +1,17 @@
-﻿using AngleSharp.Dom;
+﻿using System.Runtime.CompilerServices;
+using AngleSharp.Dom;
+using CS2Browser.Engine;
 using Microsoft.ClearScript.V8;
 
 namespace CS2Browser.Scripting;
 
 public sealed class V8DomContext : IDisposable
 {
+    private static readonly ConditionalWeakTable<V8ScriptEngine, V8DomContext> ByEngine = new();
+
     private readonly V8ScriptEngine _engine;
+    private readonly WindowBridge _window;
+    private int _taskDepth;
     private bool _disposed;
 
     public V8DomContext(IDocument document)
@@ -16,6 +22,8 @@ public sealed class V8DomContext : IDisposable
         _engine = new V8ScriptEngine();
         var documentBridge = V8DomFactory.Wrap(document, _engine)!;
         var window = new WindowBridge(documentBridge, document, _engine);
+        _window = window;
+        ByEngine.AddOrUpdate(_engine, this);
 
         _engine.AddHostObject("__cs2HostWindow", window);
         _engine.AddHostObject("document", documentBridge);
@@ -87,8 +95,40 @@ public sealed class V8DomContext : IDisposable
 
     public IDocument Document { get; }
     public V8ScriptEngine Engine => _engine;
-    public object? Evaluate(string script) => _engine.Evaluate(script);
-    public void Execute(string script) => _engine.Execute(script);
+    public object? Evaluate(string script) => RunTask(() => _engine.Evaluate(script));
+    public void Execute(string script) => RunTask<object?>(() => { _engine.Execute(script); return null; });
+
+    /// <summary>
+    /// 스크립트 작업(task) 하나를 실행한다. 가장 바깥 작업이 끝나면 캐시 DOM 의 변경을 원본 DOM 에 커밋한다.
+    /// </summary>
+    public T RunTask<T>(Func<T> task)
+    {
+        _taskDepth++;
+        try
+        {
+            return task();
+        }
+        finally
+        {
+            if (--_taskDepth == 0 && !_disposed && DomCache.TryGet(Document, out var cache))
+            {
+                cache.Commit();
+            }
+        }
+    }
+
+    /// <summary>엔진에 연결된 컨텍스트가 있으면 작업 단위로 실행하고, 없으면 그냥 실행한다.</summary>
+    public static void RunTask(V8ScriptEngine engine, Action task)
+    {
+        if (ByEngine.TryGetValue(engine, out var context))
+        {
+            context.RunTask<object?>(() => { task(); return null; });
+        }
+        else
+        {
+            task();
+        }
+    }
 
     public void Dispose()
     {
@@ -97,6 +137,8 @@ public sealed class V8DomContext : IDisposable
             return;
         }
         _disposed = true;
+        _window.cancelAllTimers();
+        ByEngine.Remove(_engine);
         _engine.Dispose();
     }
 }

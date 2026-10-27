@@ -260,6 +260,7 @@ public sealed class BrowserViewControl : UserControl
             _direct2D.Resize(ClientSize.Width, ClientSize.Height);
         }
 
+        _engine.SetViewportWidth(Math.Max(1, ClientSize.Width));
         ClampScroll();
         RaiseScrollMetricsChanged();
     }

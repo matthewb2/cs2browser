@@ -4,7 +4,7 @@ namespace CS2Browser.Engine;
 
 /// <summary>
 /// V8 자바스크립트 엔진 연동.
-/// 문서 로드 시 인라인 스크립트는 V8ScriptingService 에 의해 자동 실행되며,
+/// 문서 로드 시 스크립트는 파싱이 끝난 뒤 V8ScriptingService 가 캐시 DOM 에서 실행하며,
 /// 여기서는 임의의 스크립트 문자열을 별도 스레드에서 직접 평가(evaluate)하는 기능을 제공한다.
 /// </summary>
 public sealed class ScriptEngine

@@ -23,9 +23,16 @@ public sealed class DomManager
 
     public IBrowsingContext Context { get; }
 
+    /// <summary>레이아웃/렌더링이 사용하는 원본 문서.</summary>
     public IDocument? Document { get; private set; }
 
+    /// <summary>자바스크립트가 조작하는 캐시 DOM.</summary>
+    public DomCache? Cache { get; private set; }
+
     public event EventHandler<IDocument>? DocumentLoaded;
+
+    /// <summary>캐시 DOM 의 변경이 원본 문서에 커밋되었을 때 발생한다.</summary>
+    public event EventHandler? DomCommitted;
 
     public DomManager(ResourceLoader resourceLoader)
     {
@@ -82,7 +89,22 @@ public sealed class DomManager
 
     private void SetDocument(IDocument document)
     {
+        if (Cache is not null)
+        {
+            Cache.Committed -= OnCacheCommitted;
+            V8ScriptingService.ReleaseContext(Cache.Document);
+            Cache.Dispose();
+        }
+
         Document = document;
+        Cache = DomCache.GetOrCreate(document);
+        Cache.Committed += OnCacheCommitted;
+
+        // 파싱 중 미뤄 둔 스크립트를 캐시 문서에서 실행하고 원본에 커밋한다.
+        V8ScriptingService.RunPendingScripts(document);
+
         DocumentLoaded?.Invoke(this, document);
     }
+
+    private void OnCacheCommitted(object? sender, EventArgs e) => DomCommitted?.Invoke(this, EventArgs.Empty);
 }

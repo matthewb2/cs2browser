@@ -12,6 +12,10 @@ namespace CS2Browser.Engine;
 public sealed class BrowserEngine : IDisposable
 {
     private const int MaxMetaRedirects = 5;
+    private readonly SynchronizationContext? _syncContext;
+    private float _viewportWidth = 1f;
+    private IDocument? _layoutDocument;
+    private bool _reformatPending;
     public ResourceLoader ResourceLoader { get; }
     public DomManager DomManager { get; }
     public ScriptEngine ScriptEngine { get; }
@@ -33,6 +37,8 @@ public sealed class BrowserEngine : IDisposable
         LayoutBuilder = new LayoutTreeBuilder();
 
         DomManager.DocumentLoaded += OnDocumentLoaded;
+        DomManager.DomCommitted += (_, _) => ScheduleReformat();
+        _syncContext = SynchronizationContext.Current;
     }
 
     /// <summary>주소를 로드하고 레이아웃까지 계산한다.</summary>
@@ -69,7 +75,10 @@ public sealed class BrowserEngine : IDisposable
     /// <summary>현재 문서를 기준으로 레이아웃 트리를 다시 만든다.</summary>
     public void BuildLayout(float viewportWidth)
     {
+        _viewportWidth = Math.Max(1f, viewportWidth);
+        _reformatPending = false;
         var document = DomManager.Document;
+        _layoutDocument = document;
         if (document is not null)
         {
             DomManager.SetViewport((int)MathF.Max(1f, viewportWidth), 768);
@@ -80,6 +89,58 @@ public sealed class BrowserEngine : IDisposable
             : LayoutBuilder.Build(document, Math.Max(1f, viewportWidth));
 
         LayoutUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>뷰포트 폭이 바뀌면 레이아웃을 다시 계산하도록 예약한다.</summary>
+    public void SetViewportWidth(float viewportWidth)
+    {
+        viewportWidth = Math.Max(1f, viewportWidth);
+        if (MathF.Abs(viewportWidth - _viewportWidth) < 0.5f)
+        {
+            return;
+        }
+
+        _viewportWidth = viewportWidth;
+        ScheduleReformat();
+    }
+
+    /// <summary>
+    /// NetSurf 의 content reformat 처럼 레이아웃 재계산을 UI 스레드에 예약한다.
+    /// 여러 번 커밋되어도 다음 턴에 한 번만 재계산한다. 동기화 컨텍스트가 없으면 즉시 실행한다.
+    /// </summary>
+    public void ScheduleReformat()
+    {
+        if (_reformatPending)
+        {
+            return;
+        }
+
+        _reformatPending = true;
+        if (_syncContext is null)
+        {
+            Reformat();
+        }
+        else
+        {
+            _syncContext.Post(_ => Reformat(), null);
+        }
+    }
+
+    private void Reformat()
+    {
+        if (!_reformatPending)
+        {
+            return;
+        }
+
+        // 로드 중인 문서는 Navigate/LoadHtml 이 끝날 때 레이아웃된다.
+        if (DomManager.Document is null || !ReferenceEquals(DomManager.Document, _layoutDocument))
+        {
+            _reformatPending = false;
+            return;
+        }
+
+        BuildLayout(_viewportWidth);
     }
 
     private void OnDocumentLoaded(object? sender, IDocument document)
