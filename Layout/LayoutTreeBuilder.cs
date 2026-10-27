@@ -54,6 +54,15 @@ public sealed class LayoutTreeBuilder
         var body = document.Body ?? document.DocumentElement;
         if (body is not null)
         {
+            // [추가] body나 문서 루트의 배경색을 먼저 읽어옴
+            var bodyStyle = SafeStyle(body);
+            var bodyBg = ReadBackground(bodyStyle);
+            if (bodyBg is not null)
+            {
+                // body에 지정된 배경색이 있다면 뷰포트(캔버스) 전체 배경색으로 전파(Propagation)시킴
+                root.BackgroundColor = bodyBg;
+            }
+
             var bottom = LayoutElement(body, root, 0f, 0f, viewportWidth, null);
             root.Height = bottom;
         }

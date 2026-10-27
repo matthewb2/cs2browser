@@ -68,6 +68,12 @@ public sealed class PaintEngine : IDisposable
 
     private void PaintBox(ID2D1RenderTarget target, Direct2DContext context, LayoutBox box, TextSelection? selection)
     {
+        // [디버깅 코드 추가] 박스별 배경색 읽기 상태 확인
+        if (box.TagName == "body" || box.BackgroundColor is not null)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PaintBox] Tag: <{box.TagName}>, Background: {box.BackgroundColor?.ToString() ?? "null"}");
+        }
+
         if (box.BackgroundColor is DColor background && background.A > 0f)
         {
             var rectangle = new DRect(
