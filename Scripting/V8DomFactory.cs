@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
+using AngleSharp.Css.Dom;
 using AngleSharp.Dom;
 using CS2Browser.Scripting.Generated;
 using Microsoft.ClearScript.V8;
@@ -56,7 +57,7 @@ public static class V8DomFactory
     /// </summary>
     public static object? WrapInlineStyle(AngleSharp.Dom.IElement element, V8ScriptEngine engine)
     {
-        var declaration = AngleSharp.Css.Dom.ElementCssInlineStyleExtensions.GetStyle(element);
+        var declaration = element.GetStyle();
         if (declaration is null)
         {
             return null;
