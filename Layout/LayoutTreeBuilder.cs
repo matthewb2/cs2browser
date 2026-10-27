@@ -59,7 +59,24 @@ public sealed class LayoutTreeBuilder
         }
 
         root.TextBuffer = _textBuffer.ToString();
+
+        // 디버깅: 레이아웃 트리 구조 출력
+        Debug.WriteLine("=== LAYOUT TREE DEBUG START ===");
+        PrintLayoutBoxDebug(root, 0);
+        Debug.WriteLine("=== LAYOUT TREE DEBUG END ===");
+
         return root;
+    }
+
+    private void PrintLayoutBoxDebug(LayoutBox box, int indentLevel)
+    {
+        string indent = new string(' ', indentLevel * 2);
+        Debug.WriteLine($"{indent}[{box.TagName}] Pos: ({box.X:F1}, {box.Y:F1}), Size: {box.Width:F1}x{box.Height:F1}, Margin: [{box.MarginTop:F1},{box.MarginRight:F1},{box.MarginBottom:F1},{box.MarginLeft:F1}], Padding: [{box.PaddingTop:F1},{box.PaddingRight:F1},{box.PaddingBottom:F1},{box.PaddingLeft:F1}]");
+        
+        foreach (var child in box.Children)
+        {
+            PrintLayoutBoxDebug(child, indentLevel + 1);
+        }
     }
 
     /// <summary>
@@ -83,7 +100,9 @@ public sealed class LayoutTreeBuilder
         var link = GetLinkTarget(element) ?? inheritedLink;
         var handler = LayoutHandlerFactory.GetHandler(element, display);
 
-        return handler.Layout(element, style, parent, left, top, availableWidth, link, this);
+        var resultY = handler.Layout(element, style, parent, left, top, availableWidth, link, this);
+        Debug.WriteLine($"[LayoutElement] Element: <{element.LocalName}>, Display: {display}, Calculated Bottom: {resultY:F1}");
+        return resultY;
     }
 
     /// <summary>
@@ -107,7 +126,7 @@ public sealed class LayoutTreeBuilder
         contentLeft = left + edges.MarginLeft + edges.BorderLeft + edges.PaddingLeft;
         contentTop = top + edges.MarginTop + edges.BorderTop + edges.PaddingTop;
         innerWidth = MathF.Max(
-            1f,
+            0f,
             availableWidth
             - edges.MarginLeft - edges.MarginRight
             - edges.BorderLeft - edges.BorderRight
