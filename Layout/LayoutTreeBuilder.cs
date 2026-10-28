@@ -128,13 +128,21 @@ public sealed class LayoutTreeBuilder
         LinkTarget? link,
         out float contentLeft,
         out float contentTop,
-        out float innerWidth)
+        out float innerWidth,
+        bool isFirstChild = false) // 첫 번째 자식 여부 옵션 추가
     {
         var edges = ReadEdges(style);
 
-        // 박스의 Border-box 좌상단 위치
+        // W3C 표준 마진 병합: 부모의 PaddingTop과 BorderTop이 0이고 첫 번째 자식인 경우, 상단 마진은 부모 바깥으로 병합됨
+        float effectiveMarginTop = edges.MarginTop;
+        if (isFirstChild && parent.PaddingTop == 0f && parent.BorderTop == 0f)
+        {
+            effectiveMarginTop = 0f;
+        }
+
+        // 박스의 Border-box 좌상단 위치 (마진 병합 적용)
         float boxX = left + edges.MarginLeft;
-        float boxY = top + edges.MarginTop;
+        float boxY = top + effectiveMarginTop;
 
         // 실제 내부 content 영역의 좌상단 위치
         contentLeft = boxX + edges.BorderLeft + edges.PaddingLeft;
@@ -152,7 +160,7 @@ public sealed class LayoutTreeBuilder
             TagName = element.LocalName,
             BackgroundColor = ReadBackground(style),
             Link = link,
-            MarginTop = edges.MarginTop,
+            MarginTop = edges.MarginTop, // 원본 마진 값은 메타데이터로 보존
             MarginRight = edges.MarginRight,
             MarginBottom = edges.MarginBottom,
             MarginLeft = edges.MarginLeft,

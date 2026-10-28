@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using AngleSharp.Dom;
 
@@ -16,6 +17,10 @@ internal sealed class InlineFlow
     private readonly float _x;
     private readonly float _maxWidth;
     private float _y;
+
+    // 마진 병합(Margin Collapsing) 상태 추적용 필드
+    private bool _isFirstBoxChild = true;
+    private float _previousMarginBottom = 0f;
 
     public InlineFlow(LayoutTreeBuilder builder, LayoutBox box, float x, float y, float maxWidth)
     {
@@ -113,7 +118,41 @@ internal sealed class InlineFlow
     public void LayoutBoxChild(IElement element, LinkTarget? link)
     {
         Flush();
-        _y = _builder.LayoutElement(element, _box, _x, _y, _maxWidth, link);
+
+        var style = LayoutTreeBuilder.SafeStyle(element);
+        var edges = LayoutTreeBuilder.ReadEdges(style);
+
+        float topArg;
+
+        if (_isFirstBoxChild)
+        {
+            _isFirstBoxChild = false;
+
+            // W3C 표준 마진 병합: 부모의 PaddingTop과 BorderTop이 0이면,
+            // 첫 번째 자식의 상단 마진은 부모 바깥으로 완전히 병합됩니다.
+            if (_box.PaddingTop == 0f && _box.BorderTop == 0f)
+            {
+                // [수정] 첫 번째 자식의 상단 마진이 부모 위로 완전히 빠져나가므로,
+                // 레이아웃 시작 좌표(topArg)를 마진만큼 뺀 위치(_y)에서 시작하여 
+                // 결과적으로 body의 시작점과 h1의 경계가 정확히 일치하도록 합니다.
+                topArg = _y - edges.MarginTop;
+                _previousMarginBottom = edges.MarginBottom;
+            }
+            else
+            {
+                topArg = _y;
+                _previousMarginBottom = edges.MarginBottom;
+            }
+        }
+        else
+        {
+            // 인접 형제 간 마진 병합
+            float collapsedMargin = MathF.Max(_previousMarginBottom, edges.MarginTop);
+            topArg = _y - _previousMarginBottom + collapsedMargin - edges.MarginTop;
+            _previousMarginBottom = edges.MarginBottom;
+        }
+
+        _y = _builder.LayoutElement(element, _box, _x, topArg, _maxWidth, link);
     }
 
     /// <summary>예약된 인라인 런을 실제 줄로 배치하고, 다음 콘텐츠의 Y 좌표를 반환한다.</summary>
@@ -136,7 +175,6 @@ internal sealed class InlineFlow
     /// </summary>
     private float Flow(List<LayoutTreeBuilder.TextRunInfo> runs)
     {
-        // 공유 버퍼의 현재 스냅샷. 각 런의 [Start, Start+Length) 오프셋이 이 버퍼를 가리킨다.
         var buffer = _builder.TextBuffer.ToString();
 
         var lineHeight = LayoutTreeBuilder.LineHeightFactor * runs
@@ -150,11 +188,11 @@ internal sealed class InlineFlow
         var lineTop = _y;
         var bottom = _y;
         var cursorX = x;
-        var hasContent = false;      // 현재 줄에 내용이 있는지
-        var hasAnyContent = false;   // 블록에 내용이 하나라도 있는지
-        var pendingBreaks = 0;       // 아직 반영되지 않은 강제 줄바꿈 수
-        var pendingSpace = false;    // 공백이 있었는지(공백에서 줄바꿈 가능)
-        var previousWasCjk = false;  // 직전 토큰이 CJK 글자였는지(글자 단위 줄바꿈)
+        var hasContent = false;
+        var hasAnyContent = false;
+        var pendingBreaks = 0;
+        var pendingSpace = false;
+        var previousWasCjk = false;
         LineBox? line = null;
 
         void StartLine()
@@ -189,7 +227,6 @@ internal sealed class InlineFlow
                     continue;
                 }
 
-                // 토큰 추출: CJK/한글은 한 글자씩, 그 외는 단어 단위.
                 var tokenStart = index;
                 var isCjk = LayoutTreeBuilder.IsCjkChar(ch);
                 if (isCjk)
@@ -207,7 +244,6 @@ internal sealed class InlineFlow
                 var token = buffer.AsSpan(tokenStart, index - tokenStart);
                 var tokenWidth = _builder.MeasureWidth(token, style.FontSize, style.FontFamily, style.Bold, style.Italic);
 
-                // 대기 중인 강제 줄바꿈을 반영한다. 블록 선두의 줄바꿈은 무시한다.
                 if (pendingBreaks > 0)
                 {
                     if (hasAnyContent)
@@ -232,9 +268,6 @@ internal sealed class InlineFlow
                     StartLine();
                 }
 
-                // 이 토큰 앞에서 줄을 바꿀 수 있는지:
-                //  - CJK 글자이거나, 앞에 공백이 있었거나,
-                //  - 직전 토큰이 CJK 글자였으면 (한글은 글자 단위 줄바꿈)
                 var canBreakBefore = isCjk || pendingSpace || previousWasCjk;
                 var spaceWidth = pendingSpace
                     ? _builder.MeasureWidth(" ", style.FontSize, style.FontFamily, style.Bold, style.Italic)
@@ -285,10 +318,6 @@ internal sealed class InlineFlow
         return bottom;
     }
 
-    /// <summary>
-    /// 연속된 공백/탭은 하나의 공백으로 축약하되, 개행(\r\n, \r, \n)은
-    /// 줄바꿈 기준('\n')으로 보존한다.
-    /// </summary>
     private static string NormalizeInlineWhitespace(string value)
     {
         var builder = new StringBuilder(value.Length);
@@ -329,7 +358,6 @@ internal sealed class InlineFlow
         return builder.ToString();
     }
 
-    /// <summary>단어 토큰의 경계가 되는 문자(공백/개행/CJK 글자)인지 확인한다.</summary>
     private static bool IsTokenBoundary(char ch)
         => ch == ' ' || ch == '\n' || LayoutTreeBuilder.IsCjkChar(ch);
 }

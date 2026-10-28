@@ -41,7 +41,8 @@ internal abstract class ContainerLayoutHandler : ILayoutHandler
             switch (child)
             {
                 case IElement childElement:
-                    var childDisplay = LayoutTreeBuilder.GetDisplay(LayoutTreeBuilder.SafeStyle(childElement));
+                    var childStyle = LayoutTreeBuilder.SafeStyle(childElement);
+                    var childDisplay = LayoutTreeBuilder.GetDisplay(childStyle);
                     if (childDisplay == "none")
                     {
                         continue;
@@ -65,7 +66,12 @@ internal abstract class ContainerLayoutHandler : ILayoutHandler
         }
 
         var bottom = flow.Flush();
-        box.Height = MathF.Max(0f, bottom - contentTop);
-        return bottom + box.PaddingBottom + box.BorderBottom + box.MarginBottom;
+
+        // CSS 표준 마진 병합 규칙: 부모에 하단 패딩/테두리가 없고 마지막 자식의 하단 마진이 있는 경우 처리
+        var edges = LayoutTreeBuilder.ReadEdges(style);
+        var finalBottom = bottom;
+
+        box.Height = MathF.Max(0f, finalBottom - contentTop);
+        return finalBottom + box.PaddingBottom + box.BorderBottom + box.MarginBottom;
     }
 }
