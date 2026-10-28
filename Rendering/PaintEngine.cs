@@ -244,11 +244,15 @@ public sealed class PaintEngine : IDisposable
             return;
         }
 
+        // 폰트 렌더링 시 상단 Line-height 여백(캡-라인 높이 및 베이스라인 오프셋)을
+        // 크롬(Skia / DirectWrite 메트릭 기준)과 일치하도록 미세 보정 (-2px 정도 상향 조정)
+        var offsetY = -MathF.Max(1.5f, run.FontSize * 0.08f);
+
         _textRenderer.DrawText(
             target,
             text,
             x,
-            line.Y,
+            line.Y + offsetY,
             run.Width + 2f,
             line.Height,
             context.GetBrush(color),
