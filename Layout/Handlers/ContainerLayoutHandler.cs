@@ -48,7 +48,7 @@ internal abstract class ContainerLayoutHandler : ILayoutHandler
                         continue;
                     }
 
-                    if (LayoutHandlerFactory.IsInlineChild(childElement, childDisplay))
+                    if (LayoutHandlerFactory.IsInlineLevel(childElement, childDisplay))
                     {
                         flow.AppendInlineElement(childElement, textStyle, link);
                     }

@@ -70,16 +70,16 @@ internal sealed class InlineFlow
             return;
         }
 
-        if (name is "input" or "textarea")
-        {
-            LayoutBoxChild(element, link);
-            return;
-        }
-
         var style = LayoutTreeBuilder.SafeStyle(element);
         var display = LayoutTreeBuilder.GetDisplay(style);
         if (display == "none")
         {
+            return;
+        }
+
+        if (name is "input" or "textarea")
+        {
+            LayoutInlineBoxChild(element, link);
             return;
         }
 
@@ -112,6 +112,62 @@ internal sealed class InlineFlow
         {
             LayoutBoxChild(element, childLink);
         }
+    }
+
+    /// <summary>
+    /// 인라인 흐름 안에서 atomic inline 박스(예: input, textarea, inline-block)를 가로 선상에 배치한다.
+    /// </summary>
+    public void LayoutInlineBoxChild(IElement element, LinkTarget? link)
+    {
+        // 먼저 쌓여있는 인라인 텍스트 런들을 같은 줄로 배치
+        Flush();
+
+        // 현재 가장 아래쪽에 생성된 라인의 Y 위치 또는 기본 Y 위치 계산
+        float curY = _y;
+        float curX = _x;
+
+        if (_box.Lines.Count > 0)
+        {
+            var lastLine = _box.Lines[^1];
+            curX = lastLine.X + lastLine.Width;
+            curY = lastLine.Y;
+        }
+
+        float availableWidth = MathF.Max(0f, _maxWidth - (curX - _x));
+
+        // 공간이 부족하면 다음 줄로 넘김
+        if (availableWidth < 30f && curX > _x)
+        {
+            curX = _x;
+            curY = _y;
+            availableWidth = _maxWidth;
+        }
+
+        float bottomY = _builder.LayoutElement(element, _box, curX, curY, availableWidth, link);
+
+        if (_box.Children.Count > 0)
+        {
+            var childBox = _box.Children[^1];
+            if (_box.Lines.Count > 0 && curX > _x)
+            {
+                var lastLine = _box.Lines[^1];
+                lastLine.Width += childBox.Width + childBox.MarginLeft + childBox.MarginRight;
+                lastLine.Height = MathF.Max(lastLine.Height, childBox.Height + childBox.MarginTop + childBox.MarginBottom);
+            }
+            else
+            {
+                var newNominalLine = new LineBox
+                {
+                    X = curX,
+                    Y = curY,
+                    Width = childBox.Width + childBox.MarginLeft + childBox.MarginRight,
+                    Height = childBox.Height + childBox.MarginTop + childBox.MarginBottom
+                };
+                _box.Lines.Add(newNominalLine);
+            }
+        }
+
+        _y = MathF.Max(_y, bottomY);
     }
 
     /// <summary>현재 줄을 끊고 박스 자식을 세로로 배치한다.</summary>
@@ -194,6 +250,19 @@ internal sealed class InlineFlow
         var pendingSpace = false;
         var previousWasCjk = false;
         LineBox? line = null;
+
+        if (_box.Lines.Count > 0)
+        {
+            line = _box.Lines[^1];
+            cursorX = line.X + line.Width;
+            lineTop = line.Y;
+            lineHeight = MathF.Max(line.Height, lineHeight);
+            if (line.Width > 0)
+            {
+                hasContent = true;
+                hasAnyContent = true;
+            }
+        }
 
         void StartLine()
         {
@@ -312,7 +381,7 @@ internal sealed class InlineFlow
 
         if (line is not null)
         {
-            line.Width = cursorX - x;
+            line.Width = cursorX - line.X;
         }
 
         return bottom;
