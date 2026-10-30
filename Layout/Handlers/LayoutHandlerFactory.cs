@@ -109,12 +109,6 @@ internal static class LayoutHandlerFactory
     /// </summary>
     public static bool IsInlineChild(IElement element, string display)
     {
-        var name = element.LocalName;
-        if (string.Equals(name, "input", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, "textarea", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
 
         return !LayoutTreeBuilder.IsImageElement(element)
             && !LayoutTreeBuilder.ContainsImage(element)
