@@ -31,16 +31,20 @@ internal sealed class InputLayoutHandler : ILayoutHandler
         var edges = LayoutTreeBuilder.ReadEdges(style);
         var textStyle = LayoutTreeBuilder.ReadTextStyle(style);
 
+        // label 등 주변 인라인 요소와의 기본 간격(2px) 적용
+        var marginLeft = edges.MarginLeft > 0f ? edges.MarginLeft : 2f;
+        var marginRight = edges.MarginRight > 0f ? edges.MarginRight : 2f;
+
         // 브라우저 UA 스타일과 유사하게, CSS 가 전혀 없어도 입력 상자가 보이도록
         // 기본 테두리/안쪽 여백을 준다.
         var (borderTop, borderRight, borderBottom, borderLeft) = EnsureBorder(edges);
         var (padTop, padRight, padBottom, padLeft) = EnsurePadding(edges);
 
-        var leftInner = left + edges.MarginLeft + borderLeft + padLeft;
+        var leftInner = left + marginLeft + borderLeft + padLeft;
         var topInner = top + edges.MarginTop + borderTop + padTop;
 
         var innerWidth = availableWidth
-            - edges.MarginLeft - edges.MarginRight
+            - marginLeft - marginRight
             - borderLeft - borderRight
             - padLeft - padRight;
         if (innerWidth < 10f)
@@ -113,9 +117,9 @@ internal sealed class InputLayoutHandler : ILayoutHandler
             BorderColor = GetBorderColor(style),
             Link = link,
             MarginTop = edges.MarginTop,
-            MarginRight = edges.MarginRight,
+            MarginRight = marginRight,
             MarginBottom = edges.MarginBottom,
-            MarginLeft = edges.MarginLeft,
+            MarginLeft = marginLeft,
             BorderTop = borderTop,
             BorderRight = borderRight,
             BorderBottom = borderBottom,

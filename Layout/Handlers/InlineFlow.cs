@@ -148,11 +148,14 @@ internal sealed class InlineFlow
         if (_box.Children.Count > 0)
         {
             var childBox = _box.Children[^1];
+            float totalChildWidth = childBox.Width + childBox.BorderLeft + childBox.BorderRight + childBox.PaddingLeft + childBox.PaddingRight + childBox.MarginLeft + childBox.MarginRight;
+            float totalChildHeight = childBox.Height + childBox.BorderTop + childBox.BorderBottom + childBox.PaddingTop + childBox.PaddingBottom + childBox.MarginTop + childBox.MarginBottom;
+
             if (_box.Lines.Count > 0 && curX > _x)
             {
                 var lastLine = _box.Lines[^1];
-                lastLine.Width += childBox.Width + childBox.MarginLeft + childBox.MarginRight;
-                lastLine.Height = MathF.Max(lastLine.Height, childBox.Height + childBox.MarginTop + childBox.MarginBottom);
+                lastLine.Width += totalChildWidth;
+                lastLine.Height = MathF.Max(lastLine.Height, totalChildHeight);
             }
             else
             {
@@ -160,8 +163,8 @@ internal sealed class InlineFlow
                 {
                     X = curX,
                     Y = curY,
-                    Width = childBox.Width + childBox.MarginLeft + childBox.MarginRight,
-                    Height = childBox.Height + childBox.MarginTop + childBox.MarginBottom
+                    Width = totalChildWidth,
+                    Height = totalChildHeight
                 };
                 _box.Lines.Add(newNominalLine);
             }
