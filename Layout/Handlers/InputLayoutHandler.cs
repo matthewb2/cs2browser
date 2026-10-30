@@ -14,7 +14,7 @@ internal sealed class InputLayoutHandler : ILayoutHandler
     public static readonly InputLayoutHandler Instance = new();
 
     private const float DefaultInputWidth = 160f;
-    private const float DefaultInputHeight = 22f;
+    private const float DefaultInputHeight = 20f;
     private const float DefaultTextareaMinHeight = 48f;
     private const float TextareaLineHeightFactor = 1.6f;
 
@@ -100,9 +100,9 @@ internal sealed class InputLayoutHandler : ILayoutHandler
             }
 
             height = cssHeight > 0f ? cssHeight : DefaultInputHeight;
-            if (height < lineHeight + 6f)
+            if (height < fontSize + 2f)
             {
-                height = lineHeight + 6f;
+                height = fontSize + 2f;
             }
         }
 
